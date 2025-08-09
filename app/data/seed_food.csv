@@ -1,0 +1,11 @@
+name,category,nutrients_json,contraindications_text,recommended_portion,notes
+Mắm ruốc,Gia vị truyền thống,"{""energy"": ""180 kcal/100g"", ""sodium"": ""rất cao"", ""protein"": ""15g"", ""umami"": ""cao""}",Tăng huyết áp: tránh. Bệnh thận: hạn chế nghiêm ngặt,5-10g/bữa,Gia vị đặc trưng miền Bắc
+Tương ớt Sriracha,Gia vị,"{""energy"": ""100 kcal/100g"", ""sodium"": ""1690mg"", ""capsaicin"": ""trung bình"", ""sugar"": ""16g""}",Loét dạ dày: tránh. Reflux: hạn chế,5-15ml/bữa,Tương ớt gốc Việt nổi tiếng thế giới
+Nem chua,Thực phẩm lên men,"{""energy"": ""180 kcal/100g"", ""lactobacillus"": ""cao"", ""sodium"": ""950mg"", ""protein"": ""12g""}",Bệnh thận: hạn chế. Tăng huyết áp: cẩn thận,50-70g/lần,Thực phẩm lên men truyền thống
+Bánh tráng nướng,Snack truyền thống,"{""energy"": ""380 kcal/100g"", ""carbs"": ""75g"", ""fiber"": ""2.1g"", ""sodium"": ""680mg""}",Tiểu đường: hạn chế. Béo phì: ăn ít,1-2 tờ/lần,Đặc sản Tây Ninh
+Rau răm,Rau thơm Việt Nam,"{""energy"": ""35 kcal/100g"", ""vitamin_c"": ""45mg"", ""essential_oils"": ""cao"", ""antioxidants"": ""trung bình""}",Thai kỳ: tránh do tinh dầu. Dị ứng: cẩn thận,10-20g/bữa,Rau thơm đặc trưng món Việt
+Lá lốt,Rau gia vị,"{""energy"": ""28 kcal/100g"", ""essential_oils"": ""cao"", ""chlorophyll"": ""cao"", ""fiber"": ""4.2g""}",Thai kỳ: hạn chế. Dị ứng thực vật: cẩn thận,15-25g/bữa,Lá cuốn thịt nướng đặc sản
+Cà cuống,Gia vị đặc biệt,"{""energy"": ""220 kcal/100g"", ""protein"": ""18g"", ""pheromones"": ""đặc trưng"", ""umami"": ""rất cao""}",Dị ứng côn trùng: tránh tuyệt đối,1-2g/nồi canh,Gia vị quý hiếm Việt Nam
+Bánh đa cua,Bánh tráng đặc sản,"{""energy"": ""340 kcal/100g"", ""carbs"": ""68g"", ""protein"": ""8g"", ""calcium"": ""120mg""}",Dị ứng tôm cua: tránh. Gout: hạn chế,2-3 tờ/bữa,Đặc sản Hải Phòng
+Mắm tôm,Gia vị lên men,"{""energy"": ""130 kcal/100g"", ""sodium"": ""2800mg"", ""protein"": ""12g"", ""histamine"": ""cao""}",Tăng huyết áp: tránh. Dị ứng histamine: nguy hiểm,3-5g/bữa,Gia vị không thể thiếu món Việt
+Tía tô,Rau thơm dược liệu,"{""energy"": ""32 kcal/100g"", ""anthocyanins"": ""cao"", ""vitamin_a"": ""850mcg"", ""essential_oils"": ""perilla""}",Thai kỳ: hạn chế. Xuất huyết: cẩn thận,10-15g/bữa,Rau thơm có tính dược liệu
