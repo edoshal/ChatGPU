@@ -207,7 +207,7 @@ body {
     border-radius: 16px;
     padding: 2rem;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    min-height: calc(100vh - 128px);
+    height: calc(100vh - 128px);
 }
 
 /* Trang chat: chỉ phần nội dung chat có scroll */
@@ -291,13 +291,30 @@ body {
 }
 
 #chat-input-area .input-group .form-control {
-    flex: 1 1 auto;
+    flex: 1;
     margin: 0;
     border-right: none;
     border-radius: 20px 0 0 20px;
+    height: 45px;
+    font-size: 14px;
 }
 
 #chat-input-area .input-group .btn {
+    height: 45px;
+    min-width: 45px;
+    border-left: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#chat-input-area .input-group .btn:first-of-type {
+    border-radius: 0;
+    border-right: none;
+    border-left: none;
+}
+
+#chat-input-area .input-group .btn:last-of-type {
     border-radius: 0 20px 20px 0;
 }
 
@@ -602,3 +619,45 @@ body {
 .text-muted { color: #6c757d; }
 .text-success { color: #28a745; }
 .text-danger { color: #dc3545; }
+
+/* Chat bubbles */
+.chat-message {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.chat-message.assistant { justify-content: flex-start; }
+.chat-message.user { justify-content: flex-end; }
+
+.chat-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-avatar.assistant { background: #667eea; color: #fff; }
+.chat-avatar.user { background: #28a745; color: #fff; }
+
+.chat-bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.chat-bubble.assistant { background: #fff; border: 1px solid #e9ecef; }
+.chat-bubble.user { background: #667eea; color: #fff; }
+
+.chat-text { white-space: pre-wrap; line-height: 1.45; }
+.chat-bubble.user .chat-text a { color: #fff; text-decoration: underline; }
+
+.chat-image {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  margin-bottom: 6px;
+}

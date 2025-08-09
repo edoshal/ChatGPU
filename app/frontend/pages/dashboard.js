@@ -261,40 +261,9 @@ function renderDashboardContent(profiles, recentChats) {
         ])
     ]);
 
-    // Recent Activity Card
-    const activityCard = create('div', { className: 'card' }, [
-        create('div', { className: 'card-header' }, [
-            create('h3', { className: 'card-title' }, [
-                create('i', { className: 'fas fa-history' }),
-                ' Tư vấn gần đây'
-            ])
-        ]),
-        create('div', { className: 'card-body' }, 
-            (recentChats.length > 0) ? [
-                // Recent chats
-                create('h5', { className: 'mb-2' }, 'Phiên tư vấn gần nhất:'),
-                ...recentChats.map(chat => 
-                    create('div', { 
-                        className: 'mb-2 p-2',
-                        style: 'border-left: 3px solid #667eea; background: #f8f9fa; border-radius: 4px;'
-                    }, [
-                        create('div', { className: 'font-semibold' }, chat.session_name || 'Phiên tư vấn'),
-                        create('small', { className: 'text-muted' }, 
-                            new Date(chat.last_message_at).toLocaleString('vi-VN')
-                        )
-                    ])
-                )
-            ] : [
-                create('div', { className: 'text-center text-muted' }, [
-                    create('i', { className: 'fas fa-inbox' }),
-                    create('p', {}, 'Chưa có hoạt động nào')
-                ])
-            ]
-        )
-    ]);
     
     // Add all cards to dashboard
-    [statsCard, diseaseCard, overviewCard, profileCard, actionsCard, activityCard].forEach(card => {
+    [statsCard, diseaseCard, overviewCard].forEach(card => {
         dashboardContent.appendChild(card);
     });
 }

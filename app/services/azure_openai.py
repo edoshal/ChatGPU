@@ -80,6 +80,7 @@ def chat_with_food_tools(
     """
     Vòng lặp function calling: gọi model, nếu có tool_calls thì thực thi rồi feed-back vào cuộc hội thoại.
     tool_executor(name: str, args: Dict) -> Dict hoặc str (sẽ stringify).
+    Hỗ trợ cả text và image messages với Azure OpenAI Vision.
     """
     client = get_client()
     model = get_chat_model_name()

@@ -3,6 +3,7 @@ import os
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+import json
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request, status
 from fastapi.staticfiles import StaticFiles
@@ -78,6 +79,7 @@ class HealthProfileUpdate(BaseModel):
 class ChatMessageCreate(BaseModel):
     content: str
     message_type: str = Field("text", pattern="^(text|image)$")
+    image_data: Optional[str] = None  # Base64 encoded image
 
 class FoodCreate(BaseModel):
     name: str = Field(..., min_length=1)
@@ -453,7 +455,7 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
     # Check ownership and get profile info
     with db.get_conn() as conn:
         session = conn.execute("""
-            SELECT cs.*, hp.user_id, hp.conditions_text, hp.conditions_json 
+            SELECT cs.*, hp.user_id, hp.conditions_text, hp.conditions_json, hp.weight, hp.height 
             FROM chat_sessions cs 
             JOIN health_profiles hp ON cs.health_profile_id = hp.id 
             WHERE cs.id = ? AND hp.user_id = ?
@@ -463,8 +465,14 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
         raise HTTPException(status_code=404, detail="Chat session not found")
     
     try:
-        # Save user message
-        db.add_chat_message(session_id, "user", data.content, data.message_type)
+        # Save user message with image data if present
+        message_metadata = {}
+        if data.image_data:
+            message_metadata["has_image"] = True
+            # Store base64 image in metadata for display
+            message_metadata["image_data"] = data.image_data
+            
+        db.add_chat_message(session_id, "user", data.content, data.message_type, message_metadata)
         
         # Get profile data for AI context
         # sqlite3.Row không hỗ trợ get(); dùng key access trực tiếp
@@ -472,14 +480,16 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
             "profile_name": (session["session_name"] if "session_name" in session.keys() else "Người dùng"),
             "conditions_text": (session["conditions_text"] if "conditions_text" in session.keys() else None),
             "conditions_json": (session["conditions_json"] if "conditions_json" in session.keys() else None),
+            "weight": (session["weight"] if "weight" in session.keys() else None),
+            "height": (session["height"] if "height" in session.keys() else None),
         }
         
-        # Get recent chat history for context
+        # Get recent chat history for context (use stored role)
         recent_messages = db.list_chat_messages(session_id, limit=10)
-        chat_history = []
+        chat_history: List[Dict[str, str]] = []
         for msg in recent_messages:
-            role = "user" if msg["message_type"] == "user" else "assistant"
-            chat_history.append({"role": role, "content": msg["content"]})
+            msg_role = msg.get("role", "user")
+            chat_history.append({"role": msg_role, "content": msg["content"]})
         
         # Define tool executor function
         def tool_executor(name: str, args: dict):
@@ -488,54 +498,73 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 foods = db.search_food_by_name(food_name)
                 if foods:
                     food = foods[0]
+                    # Chuẩn hóa schema trả về để LLM sử dụng
                     return {
-                        "name": food["name"],
-                        "description": food["description"],
-                        "nutrition_info": food["nutrition_info"],
-                        "contraindications": food.get("contraindications_json", "{}") 
+                        "name": food.get("name"),
+                        "category": food.get("category"),
+                        "nutrients": food.get("nutrients", {}),
+                        "contraindications": food.get("contraindications", []),
+                        "recommended_portions": food.get("recommended_portions", {}),
+                        "preparation_notes": food.get("preparation_notes"),
                     }
                 return {"error": f"Không tìm thấy thông tin về {food_name}"}
             
-            elif name == "update_health_conditions":
+            elif name == "update_health_status":
                 new_conditions = args.get("new_conditions", [])
                 condition_text_update = args.get("condition_text_update", "")
+                weight_delta = args.get("weight_delta_kg")
+                new_weight = args.get("new_weight_kg")
                 
                 # Get current conditions from session data
                 current_conditions = (session["conditions_json"] if "conditions_json" in session.keys() else "{}")
                 if isinstance(current_conditions, str):
                     try:
                         conditions_data = json.loads(current_conditions)
-                    except:
+                    except Exception:
                         conditions_data = {"conditions_list": []}
                 else:
                     conditions_data = current_conditions or {"conditions_list": []}
                 
-                # Add new conditions
+                # Merge new conditions
                 existing_conditions = conditions_data.get("conditions_list", [])
                 for condition in new_conditions:
-                    if condition not in existing_conditions:
+                    if condition and condition not in existing_conditions:
                         existing_conditions.append(condition)
-                
                 conditions_data["conditions_list"] = existing_conditions
                 
-                # Update profile in database
-                update_data = {
+                # Build updates
+                update_data: Dict[str, Any] = {
                     "conditions_json": json.dumps(conditions_data, ensure_ascii=False)
                 }
                 if condition_text_update:
                     current_text = (session["conditions_text"] if "conditions_text" in session.keys() else "")
-                    if current_text:
-                        update_data["conditions_text"] = f"{current_text}\n{condition_text_update}"
-                    else:
-                        update_data["conditions_text"] = condition_text_update
+                    update_data["conditions_text"] = (f"{current_text}\n{condition_text_update}" if current_text else condition_text_update)
                 
-                # Get health profile ID from session
+                # Weight update
+                current_weight = None
+                try:
+                    current_weight = float(session["weight"]) if session["weight"] is not None else None
+                except Exception:
+                    current_weight = None
+                if new_weight is not None:
+                    try:
+                        update_data["weight"] = float(new_weight)
+                    except Exception:
+                        pass
+                elif weight_delta is not None and current_weight is not None:
+                    try:
+                        update_data["weight"] = float(current_weight) + float(weight_delta)
+                    except Exception:
+                        pass
+                
+                # Apply update
                 profile_id = session["health_profile_id"]
                 db.update_health_profile(profile_id, current_user["id"], **update_data)
                 
                 return {
                     "success": True,
                     "updated_conditions": existing_conditions,
+                    "new_weight": update_data.get("weight", current_weight),
                     "message": "Đã cập nhật tình trạng sức khỏe"
                 }
             
@@ -561,24 +590,32 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 }
             },
             {
-                "type": "function", 
+                "type": "function",
                 "function": {
-                    "name": "update_health_conditions",
-                    "description": "Cập nhật tình trạng sức khỏe/bệnh lý mới vào hồ sơ",
+                    "name": "update_health_status",
+                    "description": "Cập nhật hồ sơ sức khỏe: bệnh lý và các chỉ số như cân nặng",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "new_conditions": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Danh sách các tình trạng sức khỏe/bệnh lý mới"
+                                "description": "Danh sách bệnh lý/tình trạng (ví dụ: 'tiểu đường', 'cao huyết áp')"
                             },
                             "condition_text_update": {
                                 "type": "string",
-                                "description": "Mô tả chi tiết tình trạng sức khỏe cập nhật (tùy chọn)"
+                                "description": "Ghi chú ngắn về cập nhật (ví dụ: 'Tăng 2kg trong tháng này')"
+                            },
+                            "weight_delta_kg": {
+                                "type": "number",
+                                "description": "Mức thay đổi cân nặng theo kg, dương hoặc âm (ví dụ: +2 hoặc -1.5)"
+                            },
+                            "new_weight_kg": {
+                                "type": "number",
+                                "description": "Cân nặng mới nếu người dùng cung cấp rõ ràng"
                             }
                         },
-                        "required": ["new_conditions"]
+                        "required": []
                     }
                 }
             }
@@ -589,6 +626,7 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
 THÔNG TIN NGƯỜI DÙNG:
 - Hồ sơ: {profile_data.get('profile_name', 'Không rõ')}
 - Tình trạng sức khỏe: {profile_data.get('conditions_text', 'Chưa có thông tin')}
+- Cân nặng hiện tại: {profile_data.get('weight', 'chưa có')} kg
 """
         
         # Parse conditions_json for specific conditions
@@ -612,7 +650,11 @@ THÔNG TIN NGƯỜI DÙNG:
    - Đánh giá: có nên ăn, lượng bao nhiêu, cách chế biến phù hợp
 
 2. CẬP NHẬT TÌNH TRẠNG: 
-   - Khi phát hiện thông tin sức khỏe mới (như "tôi bị tiểu đường", "tôi tăng 1kg", "huyết áp cao"), hãy gọi function update_health_conditions
+   - Khi phát hiện thông tin sức khỏe mới (như "tôi bị tiểu đường", "tôi tăng 2kg", "huyết áp cao"), hãy gọi function update_health_status
+   - Truyền các tham số phù hợp: new_conditions (nếu có), condition_text_update, weight_delta_kg hoặc new_weight_kg
+   - Ví dụ:
+     + "Tôi bị tiểu đường" -> update_health_status({{"new_conditions": ["tiểu đường"], "condition_text_update": "Người dùng khai báo bị tiểu đường"}})
+     + "Tôi vừa tăng 2kg trong tháng này" -> update_health_status({{"weight_delta_kg": 2, "condition_text_update": "Tăng 2kg trong tháng này"}})
    - Tự động cập nhật hồ sơ để tư vấn chính xác hơn trong tương lai
 
 3. NGUYÊN TẮC TƯ VẤN:
@@ -628,12 +670,25 @@ Hãy trả lời một cách chuyên nghiệp, thân thiện và dựa trên b�
         # Build messages
         messages = [system_message]
         messages.extend(chat_history[-6:])  # Keep last 6 messages for context
-        messages.append({"role": "user", "content": data.content})
         
-        # Get AI response with function calling
-        from services.azure_openai import chat_with_food_tools
+        # Build user message with optional image
+        user_message = {"role": "user", "content": []}
+        
+        if data.message_type == "image" and data.image_data:
+            # Image message with vision
+            user_message["content"] = [
+                {"type": "text", "text": data.content or "Hãy phân tích thực phẩm trong ảnh này và tư vấn cho tôi."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data.image_data}"}}
+            ]
+        else:
+            # Text-only message
+            user_message["content"] = data.content
+            
+        messages.append(user_message)
+        
+        # Get AI response with function calling (dùng alias llm đã import)
         try:
-            ai_response = chat_with_food_tools(messages, tools, tool_executor)
+            ai_response = llm.chat_with_food_tools(messages, tools, tool_executor)
         except Exception as ai_err:
             # Fallback khi Azure OpenAI chưa cấu hình hoặc lỗi mạng
             print(f"AI fallback due to error: {ai_err}")

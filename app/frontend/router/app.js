@@ -58,12 +58,13 @@ function showToast(message, type = 'success', duration = 5000) {
 
 // API Functions
 async function api(endpoint, options = {}) {
+    const { noLoading, ...opts } = options || {};
     const config = {
         headers: {
             'Content-Type': 'application/json',
-            ...options.headers
+            ...opts.headers
         },
-        ...options
+        ...opts
     };
     
     if (authToken) {
@@ -73,7 +74,7 @@ async function api(endpoint, options = {}) {
     const url = endpoint.startsWith('/api/') ? endpoint : `/api${endpoint}`;
     
     try {
-        showLoading();
+        if (!noLoading) showLoading();
         const response = await fetch(url, config);
         let data = null;
         try { data = await response.json(); } catch(e) {}
@@ -89,11 +90,12 @@ async function api(endpoint, options = {}) {
         showToast(error.message || 'Có lỗi xảy ra', 'error');
         throw error;
     } finally {
-        hideLoading();
+        if (!noLoading) hideLoading();
     }
 }
 
-async function apiForm(endpoint, formData) {
+async function apiForm(endpoint, formData, options = {}) {
+    const { noLoading, ...opts } = options || {};
     const config = {
         method: 'POST',
         body: formData,
@@ -107,7 +109,7 @@ async function apiForm(endpoint, formData) {
     const url = endpoint.startsWith('/api/') ? endpoint : `/api${endpoint}`;
     
     try {
-        showLoading();
+        if (!noLoading) showLoading();
         const response = await fetch(url, config);
         let data = null;
         try { data = await response.json(); } catch(e) {}
@@ -123,7 +125,7 @@ async function apiForm(endpoint, formData) {
         showToast(error.message || 'Có lỗi xảy ra', 'error');
         throw error;
     } finally {
-        hideLoading();
+        if (!noLoading) hideLoading();
     }
 }
 
