@@ -455,7 +455,7 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
     # Check ownership and get profile info
     with db.get_conn() as conn:
         session = conn.execute("""
-            SELECT cs.*, hp.user_id, hp.conditions_text, hp.conditions_json, hp.weight, hp.height 
+            SELECT cs.*, hp.user_id, hp.conditions_text, hp.conditions_json, hp.weight, hp.height, hp.age, hp.gender
             FROM chat_sessions cs 
             JOIN health_profiles hp ON cs.health_profile_id = hp.id 
             WHERE cs.id = ? AND hp.user_id = ?
@@ -482,13 +482,15 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
             "conditions_json": (session["conditions_json"] if "conditions_json" in session.keys() else None),
             "weight": (session["weight"] if "weight" in session.keys() else None),
             "height": (session["height"] if "height" in session.keys() else None),
+            "age": (session["age"] if "age" in session.keys() else None),
+            "gender": (session["gender"] if "gender" in session.keys() else None),
         }
         
         # Get recent chat history for context (use stored role)
         recent_messages = db.list_chat_messages(session_id, limit=10)
         chat_history: List[Dict[str, str]] = []
         for msg in recent_messages:
-            msg_role = msg.get("role", "user")
+            msg_role = msg["role"] if "role" in msg.keys() else "user"
             chat_history.append({"role": msg_role, "content": msg["content"]})
         
         # Define tool executor function
@@ -500,12 +502,12 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                     food = foods[0]
                     # Chuẩn hóa schema trả về để LLM sử dụng
                     return {
-                        "name": food.get("name"),
-                        "category": food.get("category"),
-                        "nutrients": food.get("nutrients", {}),
-                        "contraindications": food.get("contraindications", []),
-                        "recommended_portions": food.get("recommended_portions", {}),
-                        "preparation_notes": food.get("preparation_notes"),
+                        "name": food["name"] if "name" in food.keys() else "",
+                        "category": food["category"] if "category" in food.keys() else "",
+                        "nutrients": food["nutrients"] if "nutrients" in food.keys() else {},
+                        "contraindications": food["contraindications"] if "contraindications" in food.keys() else [],
+                        "recommended_portions": food["recommended_portions"] if "recommended_portions" in food.keys() else {},
+                        "preparation_notes": food["preparation_notes"] if "preparation_notes" in food.keys() else "",
                     }
                 return {"error": f"Không tìm thấy thông tin về {food_name}"}
             
@@ -514,16 +516,26 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 condition_text_update = args.get("condition_text_update", "")
                 weight_delta = args.get("weight_delta_kg")
                 new_weight = args.get("new_weight_kg")
+                new_height = args.get("new_height_cm")
+                age = args.get("age")
+                gender = args.get("gender")
                 
                 # Get current conditions from session data
                 current_conditions = (session["conditions_json"] if "conditions_json" in session.keys() else "{}")
                 if isinstance(current_conditions, str):
                     try:
                         conditions_data = json.loads(current_conditions)
+                        # Ensure it's a dictionary
+                        if not isinstance(conditions_data, dict):
+                            conditions_data = {"conditions_list": []}
                     except Exception:
                         conditions_data = {"conditions_list": []}
                 else:
                     conditions_data = current_conditions or {"conditions_list": []}
+                
+                # Ensure conditions_data is a dict before using .get()
+                if not isinstance(conditions_data, dict):
+                    conditions_data = {"conditions_list": []}
                 
                 # Merge new conditions
                 existing_conditions = conditions_data.get("conditions_list", [])
@@ -536,9 +548,39 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 update_data: Dict[str, Any] = {
                     "conditions_json": json.dumps(conditions_data, ensure_ascii=False)
                 }
+                
+                # Update condition text
                 if condition_text_update:
                     current_text = (session["conditions_text"] if "conditions_text" in session.keys() else "")
                     update_data["conditions_text"] = (f"{current_text}\n{condition_text_update}" if current_text else condition_text_update)
+                
+                # Update age
+                if age is not None:
+                    try:
+                        update_data["age"] = int(age)
+                    except Exception:
+                        pass
+                
+                # Update gender (map Vietnamese to English)
+                if gender:
+                    gender_mapping = {
+                        "Nam": "male",
+                        "Nữ": "female", 
+                        "Khác": "other",
+                        "male": "male",
+                        "female": "female",
+                        "other": "other"
+                    }
+                    mapped_gender = gender_mapping.get(gender)
+                    if mapped_gender:
+                        update_data["gender"] = mapped_gender
+                
+                # Update height
+                if new_height is not None:
+                    try:
+                        update_data["height"] = float(new_height)
+                    except Exception:
+                        pass
                 
                 # Weight update
                 current_weight = None
@@ -564,8 +606,11 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 return {
                     "success": True,
                     "updated_conditions": existing_conditions,
-                    "new_weight": update_data.get("weight", current_weight),
-                    "message": "Đã cập nhật tình trạng sức khỏe"
+                    "updated_weight": update_data.get("weight", current_weight),
+                    "updated_height": update_data.get("height"),
+                    "updated_age": update_data.get("age"),
+                    "updated_gender": update_data.get("gender"),
+                    "message": "Đã cập nhật tình trạng sức khỏe thành công"
                 }
             
             return {"error": f"Không tìm thấy function {name}"}
@@ -593,26 +638,39 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                 "type": "function",
                 "function": {
                     "name": "update_health_status",
-                    "description": "Cập nhật hồ sơ sức khỏe: bệnh lý và các chỉ số như cân nặng",
+                    "description": "Cập nhật hồ sơ sức khỏe khi người dùng chia sẻ thông tin về tuổi, cân nặng, chiều cao, tình trạng bệnh lý",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "new_conditions": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Danh sách bệnh lý/tình trạng (ví dụ: 'tiểu đường', 'cao huyết áp')"
+                                "description": "Danh sách bệnh lý/tình trạng mới (ví dụ: 'tiểu đường', 'cao huyết áp', 'dị ứng tôm cua')"
                             },
                             "condition_text_update": {
                                 "type": "string",
-                                "description": "Ghi chú ngắn về cập nhật (ví dụ: 'Tăng 2kg trong tháng này')"
+                                "description": "Ghi chú chi tiết về tình trạng sức khỏe (ví dụ: 'Mới phát hiện tiểu đường type 2', 'Bị dị ứng hải sản')"
+                            },
+                            "age": {
+                                "type": "integer",
+                                "description": "Tuổi của người dùng (ví dụ: 25, 45)"
+                            },
+                            "gender": {
+                                "type": "string",
+                                "enum": ["Nam", "Nữ", "Khác"],
+                                "description": "Giới tính (sử dụng tiếng Việt: Nam, Nữ, Khác)"
                             },
                             "weight_delta_kg": {
                                 "type": "number",
-                                "description": "Mức thay đổi cân nặng theo kg, dương hoặc âm (ví dụ: +2 hoặc -1.5)"
+                                "description": "Mức thay đổi cân nặng theo kg (+2 = tăng 2kg, -1.5 = giảm 1.5kg)"
                             },
                             "new_weight_kg": {
                                 "type": "number",
-                                "description": "Cân nặng mới nếu người dùng cung cấp rõ ràng"
+                                "description": "Cân nặng hiện tại theo kg (ví dụ: 65.5)"
+                            },
+                            "new_height_cm": {
+                                "type": "number",
+                                "description": "Chiều cao theo cm (ví dụ: 170)"
                             }
                         },
                         "required": []
@@ -625,8 +683,11 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
         profile_context = f"""
 THÔNG TIN NGƯỜI DÙNG:
 - Hồ sơ: {profile_data.get('profile_name', 'Không rõ')}
-- Tình trạng sức khỏe: {profile_data.get('conditions_text', 'Chưa có thông tin')}
+- Tuổi: {profile_data.get('age', 'chưa có')}
+- Giới tính: {profile_data.get('gender', 'chưa có')}
 - Cân nặng hiện tại: {profile_data.get('weight', 'chưa có')} kg
+- Chiều cao: {profile_data.get('height', 'chưa có')} cm
+- Tình trạng sức khỏe: {profile_data.get('conditions_text', 'Chưa có thông tin')}
 """
         
         # Parse conditions_json for specific conditions
@@ -649,18 +710,24 @@ THÔNG TIN NGƯỜI DÙNG:
    - Chỉ sử dụng function search_food_database khi gặp thực phẩm đặc thù/địa phương mà bạn không chắc chắn
    - Đánh giá: có nên ăn, lượng bao nhiêu, cách chế biến phù hợp
 
-2. CẬP NHẬT TÌNH TRẠNG: 
-   - Khi phát hiện thông tin sức khỏe mới (như "tôi bị tiểu đường", "tôi tăng 2kg", "huyết áp cao"), hãy gọi function update_health_status
-   - Truyền các tham số phù hợp: new_conditions (nếu có), condition_text_update, weight_delta_kg hoặc new_weight_kg
-   - Ví dụ:
-     + "Tôi bị tiểu đường" -> update_health_status({{"new_conditions": ["tiểu đường"], "condition_text_update": "Người dùng khai báo bị tiểu đường"}})
-     + "Tôi vừa tăng 2kg trong tháng này" -> update_health_status({{"weight_delta_kg": 2, "condition_text_update": "Tăng 2kg trong tháng này"}})
-   - Tự động cập nhật hồ sơ để tư vấn chính xác hơn trong tương lai
+2. CẬP NHẬT THÔNG TIN SỨC KHỎE:
+   - QUAN TRỌNG: Khi người dùng chia sẻ bất kỳ thông tin cá nhân nào về sức khỏe, hãy LUÔN gọi function update_health_status
+   - Các trường hợp cần cập nhật:
+     * Tuổi: "Tôi 25 tuổi", "Năm nay tôi 30"
+     * Giới tính: "Tôi là nam/nữ"
+     * Cân nặng: "Tôi nặng 65kg", "Tôi tăng 2kg", "Giảm được 3kg"
+     * Chiều cao: "Cao 1m70", "Tôi cao 165cm"
+     * Bệnh lý: "Tôi bị tiểu đường", "Mắc cao huyết áp", "Dị ứng hải sản"
+   - Ví dụ function calls:
+     * "Tôi 28 tuổi, cao 1m75, nặng 70kg" -> update_health_status({{"age": 28, "new_height_cm": 175, "new_weight_kg": 70}})
+     * "Tôi bị tiểu đường type 2" -> update_health_status({{"new_conditions": ["tiểu đường type 2"], "condition_text_update": "Mắc tiểu đường type 2"}})
+     * "Tăng 3kg trong 2 tháng" -> update_health_status({{"weight_delta_kg": 3, "condition_text_update": "Tăng 3kg trong 2 tháng"}})
 
 3. NGUYÊN TẮC TƯ VẤN:
    - Ưu tiên an toàn sức khỏe
    - Đưa ra lời khuyên cụ thể, thực tế
    - Khuyến nghị tham khảo bác sĩ khi cần thiết
+   - Luôn cập nhật thông tin hồ sơ khi có dữ liệu mới
 
 {profile_context}
 

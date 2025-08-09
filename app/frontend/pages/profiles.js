@@ -93,18 +93,18 @@ function renderProfilesList(profiles) {
                         profile.is_default ? create('span', { 
                             className: 'badge',
                             style: 'margin-left: 0.5rem; background: #28a745; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem;'
-                        }, 'Mặc định') : '',
+                        }, 'Mặc định') : null,
                         isActive ? create('span', { 
                             className: 'badge',
                             style: 'margin-left: 0.5rem; background: #667eea; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem;'
-                        }, 'Đang sử dụng') : ''
+                        }, 'Đang sử dụng') : null
                     ]),
                     create('div', { className: 'd-flex align-center' }, [
                         !isActive ? create('button', { 
                             className: 'btn btn-sm btn-primary',
                             onclick: () => switchToProfile(profile),
                             style: 'margin-right: 0.5rem;'
-                        }, 'Chuyển đến') : '',
+                        }, 'Chuyển đến') : null,
                         create('button', { 
                             className: 'btn btn-sm btn-secondary',
                             onclick: () => showEditProfileModal(profile)
@@ -121,28 +121,28 @@ function renderProfilesList(profiles) {
                 profile.age ? create('p', {}, [
                     create('strong', {}, 'Tuổi: '),
                     profile.age.toString()
-                ]) : '',
+                ]) : null,
                 profile.gender ? create('p', {}, [
                     create('strong', {}, 'Giới tính: '),
                     profile.gender === 'male' ? 'Nam' : profile.gender === 'female' ? 'Nữ' : 'Khác'
-                ]) : '',
+                ]) : null,
                 profile.weight ? create('p', {}, [
                     create('strong', {}, 'Cân nặng: '),
                     `${profile.weight} kg`
-                ]) : '',
+                ]) : null,
                 profile.height ? create('p', {}, [
                     create('strong', {}, 'Chiều cao: '),
                     `${profile.height} cm`
-                ]) : '',
+                ]) : null,
                 profile.conditions_text ? create('div', { className: 'mb-2' }, [
                     create('strong', {}, 'Tình trạng sức khỏe:'),
                     create('p', { className: 'text-muted' }, profile.conditions_text)
-                ]) : '',
+                ]) : null,
                 (parsedJson && parsedJson.conditions_list && parsedJson.conditions_list.length) ?
                     create('div', {}, [
                         create('strong', {}, 'Bệnh lý:'),
                         create('ul', {}, parsedJson.conditions_list.map(x => create('li', {}, x)))
-                    ]) : '' ,
+                    ]) : null ,
                 create('small', { className: 'text-muted' }, [
                     'Cập nhật: ',
                     new Date(profile.updated_at).toLocaleString('vi-VN')

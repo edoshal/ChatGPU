@@ -96,7 +96,7 @@ function renderDashboardContent(profiles, recentChats) {
                         }, name)
                     ))
                 ])
-                : '',
+                : null,
             create('div', { className: 'grid grid-3' }, [
                 create('div', {}, [
                     create('div', { className: 'text-muted mb-1' }, 'Tuổi'),
@@ -267,3 +267,16 @@ function renderDashboardContent(profiles, recentChats) {
         dashboardContent.appendChild(card);
     });
 }
+
+// Export for global access
+window.renderDashboard = renderDashboard;
+
+// Listen for profile updates to auto-refresh dashboard
+window.addEventListener('profileUpdated', (event) => {
+    // Only refresh if currently on dashboard
+    const currentPath = window.location.hash.slice(1) || '/dashboard';
+    if (currentPath === '/dashboard') {
+        console.log('Profile updated, refreshing dashboard...');
+        renderDashboard();
+    }
+});

@@ -203,9 +203,9 @@ function createMessageElement(message) {
     const bubble = create('div', { className: `chat-bubble ${isUser ? 'user' : 'assistant'}` }, contentChildren);
 
     return create('div', { className: `chat-message ${isUser ? 'user' : 'assistant'}` }, [
-        !isUser ? create('div', { className: 'chat-avatar assistant' }, [ create('i', { className: 'fas fa-robot' }) ]) : '',
+        ...((!isUser) ? [create('div', { className: 'chat-avatar assistant' }, [ create('i', { className: 'fas fa-robot' }) ])] : []),
         bubble,
-        isUser ? create('div', { className: 'chat-avatar user' }, [ create('i', { className: 'fas fa-user' }) ]) : ''
+        ...(isUser ? [create('div', { className: 'chat-avatar user' }, [ create('i', { className: 'fas fa-user' }) ])] : [])
     ]);
 }
 
@@ -371,6 +371,16 @@ async function sendMessage() {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
         chatMessages.push(userMessage, aiMessage);
+        
+        // Reload current profile data in case AI updated health status
+        if (window.__APP__ && window.__APP__.loadCurrentProfile) {
+            try {
+                await window.__APP__.loadCurrentProfile();
+                console.log('Profile data refreshed after chat update');
+            } catch (e) {
+                console.warn('Failed to refresh profile data:', e);
+            }
+        }
     } catch (error) {
         console.error('Error sending message:', error);
         const errorMessage = {

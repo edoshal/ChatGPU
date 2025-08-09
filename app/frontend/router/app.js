@@ -11,17 +11,31 @@ function $$(selector) { return document.querySelectorAll(selector); }
 function create(tag, props = {}, children = []) {
     const element = document.createElement(tag);
     Object.assign(element, props);
-    if (typeof children === 'string') {
-        element.textContent = children;
-    } else {
-        children.forEach(child => {
-            if (typeof child === 'string') {
-                element.appendChild(document.createTextNode(child));
-            } else {
-                element.appendChild(child);
-            }
-        });
+    
+    // Helper to flatten and append children
+    function appendChild(child) {
+        if (!child && child !== 0) return; // Skip falsy values except 0
+        
+        if (Array.isArray(child)) {
+            // Flatten arrays
+            child.forEach(appendChild);
+        } else if (typeof child === 'string' || typeof child === 'number') {
+            element.appendChild(document.createTextNode(String(child)));
+        } else if (child instanceof Node) {
+            element.appendChild(child);
+        } else {
+            console.warn('Invalid child type:', typeof child, child);
+        }
     }
+    
+    if (typeof children === 'string' || typeof children === 'number') {
+        element.textContent = String(children);
+    } else if (Array.isArray(children)) {
+        children.forEach(appendChild);
+    } else if (children) {
+        appendChild(children);
+    }
+    
     return element;
 }
 
@@ -189,6 +203,19 @@ async function loadCurrentProfile() {
         const profile = await api(`/profiles/${profileId}`);
         currentProfile = profile;
         updateProfileDisplay();
+        
+        // Dispatch custom event for profile update
+        window.dispatchEvent(new CustomEvent('profileUpdated', { detail: profile }));
+        
+        // Refresh dashboard if currently on dashboard page
+        const currentPath = getCurrentRoute();
+        if (currentPath === '/dashboard') {
+            setTimeout(() => {
+                const { renderDashboard } = window;
+                if (renderDashboard) renderDashboard();
+            }, 100); // Small delay to ensure profile is updated
+        }
+        
         return profile;
     } catch (error) {
         console.error('Failed to load profile:', error);
@@ -347,7 +374,7 @@ async function loadUserProfiles() {
                 }, [
                     create('i', { className: 'fas fa-user-circle' }),
                     create('span', {}, ` ${profile.profile_name}`),
-                    profile.is_default ? create('small', { className: 'text-muted' }, ' (Mặc định)') : ''
+                    ...(profile.is_default ? [create('small', { className: 'text-muted' }, ' (Mặc định)')] : [])
                 ]);
                 profileList.appendChild(item);
             });
@@ -419,3 +446,4 @@ if (document.readyState === 'loading') {
 } else {
     initializeApp();
 }
+
