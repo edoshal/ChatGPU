@@ -661,3 +661,225 @@ body {
   border: 1px solid #e9ecef;
   margin-bottom: 6px;
 }
+
+/* TTS Controls */
+.tts-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+}
+
+.tts-button {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: #6c757d;
+  font-size: 0.875rem;
+  position: relative;
+  outline: none;
+}
+
+.tts-button:hover:not(:disabled) {
+  background: #e9ecef;
+  color: #495057;
+  transform: scale(1.05);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.tts-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.tts-button:disabled {
+  cursor: default;
+  transform: none;
+}
+
+/* Trạng thái đang tạo audio */
+.tts-button:disabled .fa-circle-notch {
+  color: #007bff;
+}
+
+/* Trạng thái đang tải */
+.tts-button:disabled .fa-download {
+  color: #28a745;
+}
+
+/* Trạng thái đang phát */
+.tts-button .fa-pause,
+.tts-button .fa-play {
+  color: #007bff;
+}
+
+/* Trạng thái lỗi */
+.tts-button .fa-exclamation-triangle {
+  color: #dc3545;
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Animation cho trạng thái lỗi */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* Animation cho pulse effect */
+.fa-pulse {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.tts-button i {
+  pointer-events: none;
+}
+
+/* Tooltip style cải tiến */
+.tts-button:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.8);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 1000;
+  opacity: 0;
+  animation: fadeIn 0.3s ease forwards;
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+/* Enhanced typing indicator styles */
+#typing-indicator {
+  padding: 8px 12px;
+  background: rgba(108, 117, 125, 0.1);
+  border-radius: 12px;
+  margin: 8px 0;
+  transition: all 0.3s ease;
+}
+
+#typing-indicator small {
+  color: #6c757d;
+  font-weight: 500;
+}
+
+#typing-indicator .fa-microphone-alt {
+  color: #28a745;
+}
+
+#typing-indicator .fa-robot {
+  color: #007bff;
+}
+
+#typing-indicator .fa-volume-up {
+  color: #ffc107;
+}
+
+/* Voice Chat Styles */
+.voice-message-icon {
+  color: #28a745;
+  margin-right: 6px;
+  font-size: 0.8rem;
+  animation: pulse 2s infinite;
+}
+
+.voice-message-icon:hover {
+  color: #218838;
+  transform: scale(1.1);
+  transition: all 0.2s ease;
+}
+
+
+
+#voice-button.voice-active {
+  background: linear-gradient(135deg, #28a745, #20c997);
+  color: white;
+  border-color: #28a745;
+  animation: pulse 1.5s infinite;
+  box-shadow: 0 0 20px rgba(40, 167, 69, 0.4);
+}
+
+#voice-button.voice-active:hover {
+  background: linear-gradient(135deg, #218838, #1cc88a);
+  border-color: #1e7e34;
+  transform: scale(1.1);
+}
+
+/* Press & Hold recording state */
+#voice-button.recording {
+  background: linear-gradient(135deg, #dc3545, #e74c3c) !important;
+  color: white !important;
+  border-color: #dc3545 !important;
+  animation: pulse-red 0.8s infinite !important;
+  box-shadow: 0 0 25px rgba(220, 53, 69, 0.6) !important;
+  transform: scale(1.05) !important;
+}
+
+/* Update voice button base styles */
+#voice-button {
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border: 2px solid #dee2e6;
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: #6c757d;
+  margin-right: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+#voice-button:hover {
+  background: linear-gradient(135deg, #e9ecef, #dee2e6);
+  color: #495057;
+  transform: scale(1.1);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.recording {
+  background: #dc3545 !important;
+  color: white !important;
+  border-color: #dc3545 !important;
+  animation: pulse-red 1s infinite;
+}
+
+@keyframes pulse-red {
+  0% { 
+    background: #dc3545;
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+  }
+  70% { 
+    box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
+  }
+  100% { 
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+  }
+}

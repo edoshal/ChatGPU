@@ -72,14 +72,21 @@ function showToast(message, type = 'success', duration = 5000) {
 
 // API Functions
 async function api(endpoint, options = {}) {
-    const { noLoading, ...opts } = options || {};
+    const { noLoading, isFormData, ...opts } = options || {};
     const config = {
-        headers: {
-            'Content-Type': 'application/json',
-            ...opts.headers
-        },
+        headers: {},
         ...opts
     };
+    
+    // Chỉ set Content-Type nếu không phải FormData
+    if (!isFormData && !config.headers['Content-Type']) {
+        config.headers['Content-Type'] = 'application/json';
+    }
+    
+    // Merge additional headers
+    if (opts.headers) {
+        Object.assign(config.headers, opts.headers);
+    }
     
     if (authToken) {
         config.headers.Authorization = `Bearer ${authToken}`;

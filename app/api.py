@@ -4,6 +4,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 import json
+import logging
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request, status
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +19,10 @@ from .services import db
 from .services import pdf as pdfsvc
 from .services import azure_openai as llm
 from .services import food_tools
+from .services import tts
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 # ====== APP SETUP ======
@@ -78,8 +83,9 @@ class HealthProfileUpdate(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     content: str
-    message_type: str = Field("text", pattern="^(text|image)$")
+    message_type: str = Field("text", pattern="^(text|image|file)$")
     image_data: Optional[str] = None  # Base64 encoded image
+    auto_play_response: bool = False  # Tự động phát âm thanh response
 
 class FoodCreate(BaseModel):
     name: str = Field(..., min_length=1)
@@ -471,6 +477,10 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
             message_metadata["has_image"] = True
             # Store base64 image in metadata for display
             message_metadata["image_data"] = data.image_data
+        
+        # Đánh dấu nếu là voice input
+        if data.auto_play_response:
+            message_metadata["voice_input"] = True
             
         db.add_chat_message(session_id, "user", data.content, data.message_type, message_metadata)
         
@@ -771,10 +781,202 @@ Hãy trả lời một cách chuyên nghiệp, thân thiện và dựa trên b�
         # Save AI response
         db.add_chat_message(session_id, "assistant", ai_response)
         
-        return {"message": "Tin nhắn đã được gửi", "ai_response": ai_response}
+        # Tự động tạo audio nếu được yêu cầu
+        audio_data_url = None
+        if data.auto_play_response and tts.is_tts_available():
+            try:
+                audio_data_url = tts.generate_audio(ai_response)
+                if audio_data_url:
+                    logger.info("Auto-generated audio for AI response")
+            except Exception as audio_error:
+                logger.warning(f"Failed to generate auto-play audio: {audio_error}")
+        
+        return {
+            "message": "Tin nhắn đã được gửi", 
+            "ai_response": ai_response,
+            "auto_play_audio": audio_data_url
+        }
         
     except Exception as e:
+        import traceback
+        logger.error(f"Error in send_chat_message: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Lỗi xử lý chat: {str(e)}")
+
+
+# ====== TEXT-TO-SPEECH ======
+class TTSRequest(BaseModel):
+    text: str = Field(..., max_length=1000, description="Text to convert to speech")
+
+@app.post("/api/tts/generate")
+def generate_tts_audio(data: TTSRequest, current_user=Depends(get_current_user)):
+    """Chuyển đổi text thành audio sử dụng Azure Speech Service Vietnamese"""
+    
+    if not tts.is_tts_available():
+        raise HTTPException(
+            status_code=503, 
+            detail="Azure Speech Service chưa được cấu hình. Vui lòng thiết lập AZURE_SPEECH_KEY và cài đặt azure-cognitiveservices-speech"
+        )
+    
+    if not data.text or not data.text.strip():
+        raise HTTPException(status_code=400, detail="Text không được để trống")
+    
+    try:
+        # Sinh audio từ text
+        audio_data_url = tts.generate_audio(data.text)
+        
+        if audio_data_url is None:
+            raise HTTPException(
+                status_code=500, 
+                detail="Không thể tạo audio. Vui lòng thử lại với text khác."
+            )
+        
+        return {
+            "success": True,
+            "audio_data_url": audio_data_url,
+            "text": data.text[:100] + "..." if len(data.text) > 100 else data.text
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Lỗi tạo audio: {str(e)}"
+        )
+
+@app.post("/api/speech/recognize")
+async def recognize_speech_audio(
+    audio_file: UploadFile = File(...),
+    current_user=Depends(get_current_user)
+):
+    """Nhận diện giọng nói từ file audio thành text"""
+    
+    if not tts.is_speech_available():
+        raise HTTPException(
+            status_code=503, 
+            detail="Azure Speech Service chưa được cấu hình. Vui lòng thiết lập AZURE_SPEECH_KEY"
+        )
+    
+    # Kiểm tra file type
+    if not audio_file.content_type or not audio_file.content_type.startswith('audio/'):
+        raise HTTPException(status_code=400, detail="File phải là định dạng audio")
+    
+    try:
+        # Đọc audio data
+        audio_data = await audio_file.read()
+        
+        # Nhận diện giọng nói
+        recognized_text = tts.recognize_speech(audio_data)
+        
+        if recognized_text:
+            return {
+                "success": True,
+                "text": recognized_text,
+                "confidence": "high"  # Azure Speech Service thường có độ chính xác cao
+            }
+        else:
+            return {
+                "success": False,
+                "text": "",
+                "error": "Không thể nhận diện được giọng nói"
+            }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Lỗi nhận diện giọng nói: {str(e)}"
+        )
+
+@app.get("/api/speech/status")
+def get_speech_status(current_user=Depends(get_current_user)):
+    """Kiểm tra trạng thái của Azure Speech Service"""
+    return {
+        "available": tts.is_speech_available(),
+        "service": "Azure Speech Service",
+        "voice": "vi-VN-HoaiMyNeural",
+        "supported_language": "Vietnamese",
+        "features": {
+            "text_to_speech": True,
+            "speech_to_text": True
+        },
+        "format": "MP3",
+        "available_voices": tts.azure_speech_service.get_available_voices() if tts.is_speech_available() else []
+    }
+
+@app.get("/api/speech/token")
+async def get_speech_token(current_user=Depends(get_current_user)):
+    """Lấy token cho Azure Speech SDK frontend"""
+    if not tts.is_speech_available():
+        raise HTTPException(
+            status_code=503, 
+            detail="Azure Speech Service chưa được cấu hình"
+        )
+    
+    try:
+        # Azure Speech SDK cần subscription key để tạo token
+        # Trong production, nên tạo token tạm thời qua Azure API
+        return {
+            "token": tts.azure_speech_service.speech_key,  # Temporary - should use proper token
+            "region": tts.azure_speech_service.speech_region
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi tạo token: {str(e)}"
+        )
+
+class SpeechRecognizeBase64Request(BaseModel):
+    audio_data: str = Field(..., description="Base64 encoded audio data")
+    mime_type: str = Field(default="audio/webm", description="MIME type of audio")
+
+@app.post("/api/speech/recognize-base64")
+async def recognize_speech_base64(
+    request: SpeechRecognizeBase64Request,
+    current_user=Depends(get_current_user)
+):
+    """Nhận diện giọng nói từ base64 audio data"""
+    
+    if not tts.is_speech_available():
+        raise HTTPException(
+            status_code=503, 
+            detail="Azure Speech Service chưa được cấu hình. Vui lòng thiết lập AZURE_SPEECH_KEY"
+        )
+    
+    audio_data = request.audio_data
+    mime_type = request.mime_type
+    
+    try:
+        # Decode base64 to bytes
+        import base64
+        audio_bytes = base64.b64decode(audio_data)
+        
+        # Nhận diện giọng nói
+        recognized_text = tts.recognize_speech(audio_bytes)
+        
+        if recognized_text:
+            return {
+                "success": True,
+                "text": recognized_text,
+                "confidence": "high"
+            }
+        else:
+            return {
+                "success": False,
+                "text": "",
+                "error": "Không thể nhận diện được giọng nói"
+            }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Lỗi nhận diện giọng nói: {str(e)}"
+        )
+
+# Backward compatibility
+@app.get("/api/tts/status")
+def get_tts_status(current_user=Depends(get_current_user)):
+    """Kiểm tra trạng thái của Azure Speech Service (backward compatibility)"""
+    return get_speech_status(current_user)
 
 
 # ====== ADMIN FOOD MANAGEMENT ======

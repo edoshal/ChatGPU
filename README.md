@@ -80,6 +80,10 @@ AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_API_VERSION=2024-06-01
 AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+
+# Azure Speech Service (TÙY CHỌN cho tính năng Text-to-Speech)
+AZURE_SPEECH_KEY=your-speech-service-key
+AZURE_SPEECH_REGION=southeastasia
 ```
 
 ### 3. **Chạy ứng dụng**
