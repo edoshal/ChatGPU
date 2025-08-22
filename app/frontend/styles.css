@@ -666,6 +666,7 @@ body {
 .tts-controls {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 8px;
   padding-top: 6px;
   border-top: 1px solid rgba(0,0,0,0.08);
@@ -724,6 +725,71 @@ body {
 .tts-button .fa-exclamation-triangle {
   color: #dc3545;
   animation: shake 0.5s ease-in-out;
+}
+
+/* MMS-TTS-VIE Button (Blue sound icon) */
+.mms-tts-button {
+  background: #1877f2;
+  border-color: #1877f2;
+  color: white;
+  position: relative;
+}
+
+.mms-tts-button:hover:not(:disabled) {
+  background: #166fe5;
+  border-color: #166fe5;
+  color: white;
+  transform: scale(1.05);
+  box-shadow: 0 2px 4px rgba(24, 119, 242, 0.3);
+}
+
+/* Add a small indicator to distinguish from Azure button */
+.mms-tts-button::after {
+  content: "M";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #ffffff;
+  color: #1877f2;
+  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  font-size: 8px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #1877f2;
+}
+
+.mms-tts-button:disabled .fa-circle-notch {
+  color: #ffffff;
+}
+
+.mms-tts-button:disabled .fa-download {
+  color: #ffffff;
+}
+
+.mms-tts-button .fa-pause,
+.mms-tts-button .fa-play {
+  color: #ffffff;
+}
+
+.mms-tts-button .fa-exclamation-triangle {
+  color: #ffffff;
+}
+
+/* Azure TTS Button (original) */
+.azure-tts-button {
+  background: #f8f9fa;
+  border-color: #dee2e6;
+  color: #6c757d;
+}
+
+.azure-tts-button:hover:not(:disabled) {
+  background: #e9ecef;
+  border-color: #dee2e6;
+  color: #495057;
 }
 
 /* Animation cho trạng thái lỗi */

@@ -216,11 +216,21 @@ function createMessageElement(message) {
     if (!isUser && message.content && message.content.trim()) {
         contentChildren.push(
             create('div', { className: 'tts-controls' }, [
+                // MMS-TTS-VIE button (Blue sound icon)
                 create('button', {
-                    className: 'tts-button',
+                    className: 'tts-button mms-tts-button',
+                    type: 'button',
+                    onclick: (event) => playTextAsAudioMMS(message.content, event),
+                    title: 'Phát audio (Facebook MMS-TTS-VIE)'
+                }, [
+                    create('i', { className: 'fas fa-volume-up' })
+                ]),
+                // Azure TTS button (original)
+                create('button', {
+                    className: 'tts-button azure-tts-button',
                     type: 'button',
                     onclick: (event) => playTextAsAudio(message.content, event),
-                    title: 'Phát audio'
+                    title: 'Phát audio (Azure)'
                 }, [
                     create('i', { className: 'fas fa-volume-up' })
                 ])
@@ -375,6 +385,131 @@ async function playTextAsAudio(text, event) {
             if (button && button.innerHTML.includes('exclamation-triangle')) {
                 button.innerHTML = '<i class="fas fa-volume-up"></i>';
                 button.title = 'Phát audio';
+            }
+        }, 3000);
+    }
+}
+
+async function playTextAsAudioMMS(text, event) {
+    // Ngăn chặn default action và event propagation
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+    }
+    
+    const { api } = window.__APP__;
+    
+    // Tìm button được click (event target)
+    const button = event ? event.target.closest('.mms-tts-button') : null;
+    if (!button) return;
+
+    // Nếu đang phát audio này, thì dừng
+    if (currentAudio && currentTTSButton === button) {
+        currentAudio.pause();
+        currentAudio = null;
+        currentTTSButton = null;
+        button.innerHTML = '<i class="fas fa-volume-up"></i>';
+        button.disabled = false;
+        button.title = 'Phát audio (Facebook MMS-TTS-VIE)';
+        return;
+    }
+
+    // Dừng audio khác nếu đang phát
+    if (currentAudio && currentTTSButton) {
+        currentAudio.pause();
+        currentAudio = null;
+        currentTTSButton.innerHTML = currentTTSButton.classList.contains('mms-tts-button') ? 
+            '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-up"></i>';
+        currentTTSButton.disabled = false;
+        currentTTSButton.title = currentTTSButton.classList.contains('mms-tts-button') ? 
+            'Phát audio (Facebook MMS-TTS-VIE)' : 'Phát audio (Azure)';
+    }
+
+    try {
+        // Hiển thị trạng thái đang tạo audio
+        button.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+        button.disabled = true;
+        button.title = 'Đang tạo âm thanh (Facebook)...';
+
+        // Gọi API để tạo audio
+        const response = await api('/api/mms-tts/generate', {
+            method: 'POST',
+            body: JSON.stringify({ text: text }),
+            noLoading: true  // Không hiển thị loading global
+        });
+
+        if (response.success && response.audio_data_url) {
+            // Hiển thị trạng thái đang tải audio
+            button.innerHTML = '<i class="fas fa-download fa-pulse"></i>';
+            button.title = 'Đang tải âm thanh...';
+
+            // Tạo audio element
+            currentAudio = new Audio(response.audio_data_url);
+            currentTTSButton = button;
+
+            // Sự kiện khi audio sẵn sàng phát
+            currentAudio.addEventListener('canplaythrough', () => {
+                button.innerHTML = '<i class="fas fa-play"></i>';
+                button.title = 'Đang phát âm thanh - Click để dừng';
+            });
+
+            // Sự kiện khi audio bắt đầu phát
+            currentAudio.addEventListener('play', () => {
+                button.innerHTML = '<i class="fas fa-pause"></i>';
+                button.title = 'Đang phát âm thanh - Click để dừng';
+            });
+
+            // Sự kiện khi audio kết thúc
+            currentAudio.addEventListener('ended', () => {
+                button.innerHTML = '<i class="fas fa-volume-up"></i>';
+                button.disabled = false;
+                button.title = 'Phát audio (Facebook MMS-TTS-VIE)';
+                currentAudio = null;
+                currentTTSButton = null;
+            });
+
+            // Sự kiện khi có lỗi phát audio
+            currentAudio.addEventListener('error', (e) => {
+                button.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+                button.disabled = false;
+                button.title = 'Lỗi phát audio - Click để thử lại';
+                currentAudio = null;
+                currentTTSButton = null;
+                console.error('Error playing audio:', e);
+            });
+
+            // Bắt đầu phát audio
+            try {
+                await currentAudio.play();
+                button.disabled = false;  // Cho phép click để dừng
+            } catch (playError) {
+                throw new Error('Không thể phát audio: ' + playError.message);
+            }
+            
+        } else {
+            throw new Error(response.detail || 'Không thể tạo audio');
+        }
+
+    } catch (error) {
+        console.error('Error generating MMS-TTS:', error);
+        button.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+        button.disabled = false;
+        button.title = 'Lỗi - Click để thử lại';
+        
+        // Reset state
+        currentAudio = null;
+        currentTTSButton = null;
+        
+        // Hiển thị thông báo lỗi nhẹ nhàng
+        const errorMsg = error.message || 'Không thể phát audio';
+        console.warn('MMS-TTS Error:', errorMsg);
+        
+        // Tự động reset về trạng thái ban đầu sau 3 giây
+        setTimeout(() => {
+            if (button && button.innerHTML.includes('exclamation-triangle')) {
+                button.innerHTML = '<i class="fas fa-volume-up"></i>';
+                button.title = 'Phát audio (Facebook MMS-TTS-VIE)';
             }
         }, 3000);
     }

@@ -20,6 +20,13 @@ from .services import pdf as pdfsvc
 from .services import azure_openai as llm
 from .services import food_tools
 from .services import tts
+from .services import mms_tts
+
+# Import ChromaDB with fallback
+try:
+    from .services import chroma_db
+except Exception:
+    chroma_db = None
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -470,6 +477,9 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     
+    # Extract profile_id from session
+    profile_id = session["health_profile_id"]
+    
     try:
         # Save user message with image data if present
         message_metadata = {}
@@ -482,7 +492,19 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
         if data.auto_play_response:
             message_metadata["voice_input"] = True
             
-        db.add_chat_message(session_id, "user", data.content, data.message_type, message_metadata)
+        # Save user message to database
+        message_id = db.add_chat_message(session_id, "user", data.content, data.message_type, message_metadata)
+        
+        # Save to ChromaDB for context management
+        if chroma_db and chroma_db.is_chroma_available() and message_id:
+            chroma_db.add_chat_message(
+                user_id=current_user["id"],
+                profile_id=profile_id,
+                chat_id=session_id,
+                message_id=message_id,
+                content=data.content,
+                is_user=True
+            )
         
         # Get profile data for AI context
         # sqlite3.Row không hỗ trợ get(); dùng key access trực tiếp
@@ -496,12 +518,42 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
             "gender": (session["gender"] if "gender" in session.keys() else None),
         }
         
-        # Get recent chat history for context (use stored role)
-        recent_messages = db.list_chat_messages(session_id, limit=10)
+        # Get chat history for context
         chat_history: List[Dict[str, str]] = []
-        for msg in recent_messages:
-            msg_role = msg["role"] if "role" in msg.keys() else "user"
-            chat_history.append({"role": msg_role, "content": msg["content"]})
+        
+        if chroma_db and chroma_db.is_chroma_available():
+            # Use ChromaDB to get relevant context based on current query
+            context_messages = chroma_db.get_chat_context(
+                user_id=current_user["id"],
+                profile_id=profile_id,
+                chat_id=session_id,
+                query=data.content,
+                limit=8
+            )
+            
+            # Also get recent messages for immediate context
+            recent_messages = chroma_db.get_recent_chat_history(
+                user_id=current_user["id"],
+                profile_id=profile_id,
+                chat_id=session_id,
+                limit=6
+            )
+            
+            # Combine and deduplicate messages
+            seen_messages = set()
+            for msg in context_messages + recent_messages:
+                content_hash = msg.get("metadata", {}).get("content_hash", "")
+                if content_hash not in seen_messages:
+                    seen_messages.add(content_hash)
+                    is_user = msg.get("metadata", {}).get("is_user", False)
+                    role = "user" if is_user else "assistant"
+                    chat_history.append({"role": role, "content": msg["content"]})
+        else:
+            # Fallback to database if ChromaDB not available
+            recent_messages = db.list_chat_messages(session_id, limit=10)
+            for msg in recent_messages:
+                msg_role = msg["role"] if "role" in msg.keys() else "user"
+                chat_history.append({"role": msg_role, "content": msg["content"]})
         
         # Define tool executor function
         def tool_executor(name: str, args: dict):
@@ -778,8 +830,19 @@ Hãy trả lời một cách chuyên nghiệp, thân thiện và dựa trên b�
                 "Vui lòng cấu hình AZURE_OPENAI_ENDPOINT và AZURE_OPENAI_API_KEY để nhận tư vấn chi tiết hơn."
             )
         
-        # Save AI response
-        db.add_chat_message(session_id, "assistant", ai_response)
+        # Save AI response to database
+        ai_message_id = db.add_chat_message(session_id, "assistant", ai_response)
+        
+        # Save to ChromaDB for context management
+        if chroma_db and chroma_db.is_chroma_available() and ai_message_id:
+            chroma_db.add_chat_message(
+                user_id=current_user["id"],
+                profile_id=profile_id,
+                chat_id=session_id,
+                message_id=ai_message_id,
+                content=ai_response,
+                is_user=False
+            )
         
         # Tự động tạo audio nếu được yêu cầu
         audio_data_url = None
@@ -901,6 +964,112 @@ def get_speech_status(current_user=Depends(get_current_user)):
         "format": "MP3",
         "available_voices": tts.azure_speech_service.get_available_voices() if tts.is_speech_available() else []
     }
+
+# ====== MMS-TTS-VIE ENDPOINTS ======
+@app.post("/api/mms-tts/generate")
+def generate_mms_tts_audio(data: TTSRequest, current_user=Depends(get_current_user)):
+    """Chuyển đổi text thành audio sử dụng Facebook MMS-TTS-VIE"""
+    
+    if not mms_tts.is_mms_tts_available():
+        raise HTTPException(
+            status_code=503, 
+            detail="Facebook MMS-TTS-VIE chưa được cấu hình. Vui lòng cài đặt transformers, torch, torchaudio"
+        )
+    
+    if not data.text or not data.text.strip():
+        raise HTTPException(status_code=400, detail="Text không được để trống")
+    
+    try:
+        # Sinh audio từ text
+        audio_data_url = mms_tts.generate_audio_mms(data.text)
+        
+        if audio_data_url is None:
+            raise HTTPException(
+                status_code=500, 
+                detail="Không thể tạo audio. Vui lòng thử lại với text khác."
+            )
+        
+        return {
+            "success": True,
+            "audio_data_url": audio_data_url,
+            "text": data.text[:100] + "..." if len(data.text) > 100 else data.text,
+            "service": "Facebook MMS-TTS-VIE"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Lỗi tạo audio: {str(e)}"
+        )
+
+@app.get("/api/mms-tts/status")
+def get_mms_tts_status(current_user=Depends(get_current_user)):
+    """Kiểm tra trạng thái của Facebook MMS-TTS-VIE"""
+    return {
+        "available": mms_tts.is_mms_tts_available(),
+        "service": "Facebook MMS-TTS-VIE",
+        "model_id": "facebook/mms-tts-vie",
+        "supported_language": "Vietnamese",
+        "features": {
+            "text_to_speech": True,
+            "speech_to_text": False
+        },
+        "format": "WAV",
+        "sample_rate": 24000,
+        "model_info": mms_tts.mms_tts_service.get_model_info() if mms_tts.is_mms_tts_available() else None
+    }
+
+# ====== CHROMADB ENDPOINTS ======
+@app.get("/api/chroma/status")
+def get_chroma_status(current_user=Depends(get_current_user)):
+    """Kiểm tra trạng thái của ChromaDB"""
+    return {
+        "available": chroma_db.is_chroma_available() if chroma_db else False,
+        "service": "ChromaDB",
+        "features": {
+            "chat_history": True,
+            "context_search": True,
+            "semantic_search": True
+        },
+        "stats": chroma_db.chroma_service.get_stats() if chroma_db and chroma_db.is_chroma_available() else None,
+        "fallback_mode": chroma_db is None or not chroma_db.is_chroma_available()
+    }
+
+@app.get("/api/chroma/chat-summary/{profile_id}")
+def get_chat_summary(profile_id: int, current_user=Depends(get_current_user)):
+    """Lấy summary của chat history cho profile"""
+    if not chroma_db or not chroma_db.is_chroma_available():
+        raise HTTPException(
+            status_code=503,
+            detail="ChromaDB chưa được cấu hình hoặc không khả dụng. Vui lòng cài đặt chromadb và upgrade SQLite"
+        )
+    
+    summary = chroma_db.chroma_service.get_user_chat_summary(current_user["id"], profile_id)
+    return summary
+
+@app.delete("/api/chroma/chat-history/{profile_id}")
+def delete_chat_history(
+    profile_id: int, 
+    chat_id: Optional[int] = None,
+    current_user=Depends(get_current_user)
+):
+    """Xóa chat history"""
+    if not chroma_db or not chroma_db.is_chroma_available():
+        raise HTTPException(
+            status_code=503,
+            detail="ChromaDB chưa được cấu hình hoặc không khả dụng. Vui lòng cài đặt chromadb và upgrade SQLite"
+        )
+    
+    success = chroma_db.chroma_service.delete_chat_history(
+        user_id=current_user["id"],
+        profile_id=profile_id,
+        chat_id=chat_id
+    )
+    
+    if success:
+        return {"message": "Chat history đã được xóa thành công"}
+    else:
+        raise HTTPException(status_code=500, detail="Lỗi khi xóa chat history")
 
 @app.get("/api/speech/token")
 async def get_speech_token(current_user=Depends(get_current_user)):

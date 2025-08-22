@@ -81,11 +81,11 @@ function renderDashboardContent(profiles, recentChats) {
             ])
         ]),
         create('div', { className: 'card-body' }, [
-            profile && profile.conditions_text
-                ? create('div', { className: 'mb-3' }, [
-                    create('div', { className: 'text-muted' }, profile.conditions_text)
-                ])
-                : create('div', { className: 'text-muted mb-3' }, 'Chưa có mô tả tình trạng.'),
+            // profile && profile.conditions_text
+            //     ? create('div', { className: 'mb-3' }, [
+            //         create('div', { className: 'text-muted' }, profile.conditions_text)
+            //     ])
+            //     : create('div', { className: 'text-muted mb-3' }, 'Chưa có mô tả tình trạng.'),
             conditionsList.length
                 ? create('div', { className: 'mb-3' }, [
                     create('strong', {}, 'Bệnh lý: '),

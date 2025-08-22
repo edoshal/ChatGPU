@@ -28,6 +28,8 @@ Một hệ thống tư vấn dinh dưỡng đa người dùng sử dụng AI, ch
 - **Function Calling** tự động cập nhật hồ sơ khi phát hiện thông tin mới
 - **Tra cứu thực phẩm đặc thù** (món địa phương, đặc sản Việt Nam)
 - **Gợi ý cụ thể** về lượng ăn, cách chế biến
+- **Text-to-Speech đa nền tảng**: Azure Speech Service và Facebook MMS-TTS-VIE
+- **ChromaDB Context Management**: Lưu trữ và tìm kiếm ngữ cảnh chat thông minh
 
 ### 🥗 **Cơ sở dữ liệu thực phẩm đặc thù**
 - **Tập trung thực phẩm Việt Nam** (mắm ruốc, nem chua, rau răm...)
@@ -84,6 +86,12 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
 # Azure Speech Service (TÙY CHỌN cho tính năng Text-to-Speech)
 AZURE_SPEECH_KEY=your-speech-service-key
 AZURE_SPEECH_REGION=southeastasia
+
+# Facebook MMS-TTS-VIE (TÙY CHỌN cho tính năng Text-to-Speech thay thế)
+# Không cần API key, sử dụng model local từ Hugging Face
+
+# ChromaDB (TÙY CHỌN cho quản lý ngữ cảnh chat)
+# Không cần API key, lưu trữ local
 ```
 
 ### 3. **Chạy ứng dụng**
@@ -113,6 +121,7 @@ uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 3. **Upload tài liệu y tế** (PDF) để AI phân tích
 4. **Bắt đầu chat** để hỏi về thực phẩm và dinh dưỡng
 5. **Tra cứu thực phẩm** trong cơ sở dữ liệu
+6. **Sử dụng Text-to-Speech** với 2 lựa chọn: Azure (nút xám) hoặc Facebook MMS-TTS-VIE (nút xanh với chữ M)
 
 ### **Cho admin:**
 
@@ -171,6 +180,17 @@ users (accounts chính)
 - `POST /api/profiles/{id}/chats` - Tạo phiên chat
 - `POST /api/chats/{id}/messages` - Gửi tin nhắn
 
+### **Text-to-Speech**
+- `POST /api/tts/generate` - Tạo audio với Azure Speech Service
+- `GET /api/speech/status` - Trạng thái Azure Speech Service
+- `POST /api/mms-tts/generate` - Tạo audio với Facebook MMS-TTS-VIE
+- `GET /api/mms-tts/status` - Trạng thái Facebook MMS-TTS-VIE
+
+### **ChromaDB Context Management**
+- `GET /api/chroma/status` - Trạng thái ChromaDB
+- `GET /api/chroma/chat-summary/{profile_id}` - Summary chat history
+- `DELETE /api/chroma/chat-history/{profile_id}` - Xóa chat history
+
 ### **Foods (Admin only)**
 - `GET /api/foods` - Danh sách thực phẩm
 - `POST /api/foods` - Thêm thực phẩm
@@ -199,6 +219,7 @@ users (accounts chính)
 - [ ] Notification system
 - [ ] Mobile app (React Native)
 - [ ] Integration với wearable devices
+- [ ] Thêm các model TTS khác (Google, Amazon Polly)
 
 ### **Cải tiến hiện tại:**
 - [x] ✅ Database schema tối ưu
@@ -207,6 +228,8 @@ users (accounts chính)
 - [x] ✅ Multi-user với profiles
 - [x] ✅ Admin management system
 - [x] ✅ Security và authentication
+- [x] ✅ Multi-platform Text-to-Speech (Azure + Facebook MMS-TTS-VIE)
+- [x] ✅ ChromaDB Context Management cho chat history thông minh
 
 ## 📝 License
 

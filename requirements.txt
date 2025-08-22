@@ -11,4 +11,11 @@ aiofiles>=23.2.1
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 azure-cognitiveservices-speech>=1.37.0
+transformers>=4.35.0
+torch>=2.0.0
+torchaudio>=2.0.0
+librosa>=0.10.0
+numpy>=1.24.0
+scipy>=1.10.0
+chromadb>=0.4.0
 

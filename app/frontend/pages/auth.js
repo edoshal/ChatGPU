@@ -131,7 +131,7 @@ function renderAuth() {
                 create('small', { className: 'text-muted' }, [
                     '💡 Tài khoản demo: ',
                     create('br'),
-                    create('strong', {}, 'admin@chatgpu.local / admin123')
+                    create('strong', {}, 'admin@example.com / admin123')
                 ])
             ])
         ])
