@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from jose import jwt, JWTError
+from langchain_core.messages import HumanMessage, AIMessage
 from passlib.context import CryptContext
 
 from .services import db
@@ -510,8 +511,8 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
                         'chat_id': session_id
                     }
                 })
-                # Lấy các document liên quan từ Pinecone
-                context_docs = retriever.get_relevant_documents(data.content)
+                # Lấy các document liên quan từ Pinecone bằng phương thức invoke mới
+                context_docs = retriever.invoke(data.content)
                 for doc in context_docs:
                     chat_history_list.append({"role": doc.metadata.get('role', 'user'), "content": doc.page_content})
 
@@ -523,18 +524,25 @@ def send_chat_message(session_id: int, data: ChatMessageCreate, current_user=Dep
             if msg['content'] not in seen_contents:
                 chat_history_list.insert(0, {"role": msg["role"], "content": msg["content"]})
 
-        # 3. Tạo Agent Executor
+        # 3. Chuyển đổi lịch sử chat sang định dạng của LangChain
+        langchain_chat_history = []
+        for msg in chat_history_list:
+            if msg["role"] == "user":
+                langchain_chat_history.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                langchain_chat_history.append(AIMessage(content=msg["content"]))
+
+        # 4. Tạo Agent Executor
         agent_executor = langchain_agent.create_chatbot_agent(
             user_id=current_user["id"],
             profile_id=profile_id,
-            session_data=profile_data,
-            chat_history=chat_history_list
+            session_data=profile_data
         )
 
-        # 4. Chuẩn bị input cho Agent
-        agent_input = {"input": data.content}
+        # 5. Chuẩn bị input cho Agent
+        agent_input = {"input": data.content, "chat_history": langchain_chat_history}
         if data.message_type == "image" and data.image_data:
-             # Vision model support
+            # Vision model support
             agent_input["input"] = [
                 {"type": "text", "text": data.content or "Hãy phân tích thực phẩm trong ảnh này và tư vấn cho tôi."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data.image_data}"}}

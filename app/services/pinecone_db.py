@@ -7,8 +7,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_pinecone import Pinecone
-from pinecone import Pinecone as PineconeClient
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone as PineconeClient, ServerlessSpec
 
 # Tải biến môi trường
 load_dotenv()
@@ -47,14 +47,18 @@ class PineconeService:
             )
 
             # Kiểm tra và tạo index nếu cần
+            # Kiểm tra và tạo index nếu cần
             if self.index_name not in self.client.list_indexes().names():
                 embedding_dimension = len(self.embeddings.embed_query("test"))
+                cloud = os.getenv("PINECONE_CLOUD", "aws")
+                region = os.getenv("PINECONE_REGION", "us-east-1")
                 self.client.create_index(
                     name=self.index_name,
                     dimension=embedding_dimension,
                     metric="cosine",
+                    spec=ServerlessSpec(cloud=cloud, region=region)
                 )
-                logger.info(f"Đã tạo chỉ mục Pinecone '{self.index_name}' với chiều {embedding_dimension}.")
+                logger.info(f"Đã tạo chỉ mục Pinecone '{self.index_name}' với chiều {embedding_dimension} trên {cloud} tại {region}.")
             
             self._initialized = True
             logger.info("Dịch vụ Pinecone đã được khởi tạo thành công.")
@@ -63,13 +67,13 @@ class PineconeService:
             logger.error(f"Lỗi khi khởi tạo dịch vụ Pinecone: {e}")
             self.client = None
 
-    def get_vector_store(self) -> Optional[Pinecone]:
+    def get_vector_store(self) -> Optional[PineconeVectorStore]:
         """Lấy đối tượng LangChain VectorStore được kết nối với chỉ mục Pinecone."""
         self._initialize()
         if not self.client or not self.embeddings:
             return None
-        
-        return Pinecone.from_existing_index(self.index_name, self.embeddings)
+
+        return PineconeVectorStore.from_existing_index(self.index_name, self.embeddings)
 
     def is_available(self) -> bool:
         """Kiểm tra xem dịch vụ có được cấu hình và sẵn sàng không."""

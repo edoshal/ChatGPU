@@ -66,3 +66,30 @@ Hệ thống sử dụng Pinecone làm Vector Store chính cho môi trường pr
 
 1.  **Lưu trữ**: Sau mỗi lượt hội thoại, cả tin nhắn của người dùng và phản hồi của AI đều được `vector_store.add_texts()` để thêm vào Pinecone. Mỗi vector được gắn metadata (`user_id`, `profile_id`, `chat_id`, `role`).
 2.  **Truy xuất**: Khi có tin nhắn mới, `retriever.get_relevant_documents()` được gọi để tìm kiếm các đoạn hội thoại có liên quan nhất dựa trên sự tương đồng về ngữ nghĩa, có lọc theo metadata.
+
+---
+
+## 4. Giám sát và Gỡ lỗi với LangSmith
+
+Để đảm bảo tính minh bạch và dễ dàng gỡ lỗi cho Agent, hệ thống đã được tích hợp với **LangSmith**.
+
+### Vai trò của LangSmith
+
+LangSmith hoạt động như một công cụ theo dõi (tracing) và giám sát chuyên dụng cho các ứng dụng LLM. Nó cho phép chúng ta:
+
+- **Theo dõi toàn bộ quá trình thực thi**: Trực quan hóa từng bước suy nghĩ của Agent, từ việc nhận prompt, quyết định gọi tool, các tham số được truyền vào, cho đến kết quả trả về.
+- **Gỡ lỗi hiệu quả**: Nhanh chóng xác định tại sao Agent không hoạt động như mong đợi, ví dụ như gọi sai tool hoặc diễn giải sai kết quả.
+- **Giám sát hiệu năng**: Phân tích độ trễ và chi phí (số lượng token) cho mỗi lượt tương tác.
+
+### Cách tích hợp
+
+Việc tích hợp cực kỳ đơn giản và không yêu cầu thay đổi mã nguồn logic. Chỉ cần thiết lập các biến môi trường sau trong tệp `.env`:
+
+```env
+LANGCHAIN_TRACING_V2="true"
+LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
+LANGCHAIN_API_KEY="your-langsmith-api-key-here"
+LANGCHAIN_PROJECT="ChatGPU Health"
+```
+
+Sau khi được cấu hình, mọi lệnh gọi đến `agent_executor.invoke()` sẽ tự động được ghi lại và có thể được xem trên trang tổng quan của dự án trên LangSmith.
