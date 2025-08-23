@@ -29,7 +29,7 @@ Một hệ thống tư vấn dinh dưỡng đa người dùng sử dụng AI, ch
 - **Tra cứu thực phẩm đặc thù** (món địa phương, đặc sản Việt Nam)
 - **Gợi ý cụ thể** về lượng ăn, cách chế biến
 - **Text-to-Speech đa nền tảng**: Azure Speech Service và Facebook MMS-TTS-VIE
-- **ChromaDB Context Management**: Lưu trữ và tìm kiếm ngữ cảnh chat thông minh
+- **LangChain Agent Architecture**: Agent thông minh tự quyết định sử dụng tools và truy xuất ngữ cảnh từ Pinecone.
 
 ### 🥗 **Cơ sở dữ liệu thực phẩm đặc thù**
 - **Tập trung thực phẩm Việt Nam** (mắm ruốc, nem chua, rau răm...)
@@ -67,8 +67,13 @@ pip install -r requirements.txt
 
 ### 2. **Cấu hình biến môi trường**
 
-Tạo file `.env` (tùy chọn):
+Sao chép `env.example` thành `.env` và điền các giá trị cần thiết:
 
+```bash
+cp env.example .env
+```
+
+Nội dung tệp `.env`:
 ```env
 # Security
 SECRET_KEY=your-super-secret-jwt-key-here-should-be-very-long-and-random
@@ -77,21 +82,20 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 # CORS (production)
 ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com
 
-# Azure OpenAI (BẮT BUỘC cho chat AI)
+# Azure OpenAI (BẮT BUỘC)
 AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_API_VERSION=2024-06-01
-AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini                 # Model cho chat
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small # Model cho embedding
+
+# Pinecone (BẮT BUỘC)
+PINECONE_API_KEY=your-pinecone-api-key-here
+PINECONE_INDEX_NAME=chatgpu-history
 
 # Azure Speech Service (TÙY CHỌN cho tính năng Text-to-Speech)
 AZURE_SPEECH_KEY=your-speech-service-key
 AZURE_SPEECH_REGION=southeastasia
-
-# Facebook MMS-TTS-VIE (TÙY CHỌN cho tính năng Text-to-Speech thay thế)
-# Không cần API key, sử dụng model local từ Hugging Face
-
-# ChromaDB (TÙY CHỌN cho quản lý ngữ cảnh chat)
-# Không cần API key, lưu trữ local
 ```
 
 ### 3. **Chạy ứng dụng**
@@ -133,12 +137,17 @@ uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 
 ## 🏗️ Kiến trúc hệ thống
 
+### **Kiến trúc AI (LangChain & Pinecone)**
+
+Hệ thống sử dụng kiến trúc Agent tiên tiến để xử lý các yêu cầu phức tạp. Toàn bộ logic chatbot được quản lý bởi **LangChain Agent**, có khả năng tự quyết định sử dụng các công cụ (Tools) và truy xuất ngữ cảnh từ **Pinecone**.
+
+> 🔗 **Xem chi tiết kiến trúc tại file [IMPLEMENTATION_DETAILS.md](./IMPLEMENTATION_DETAILS.md)**
+
 ### **Backend (FastAPI)**
 - **RESTful API** với validation Pydantic
 - **JWT Authentication** với role-based access
-- **SQLite database** với relationship constraints
+- **SQLite database** cho dữ liệu chính
 - **File upload** và xử lý PDF
-- **Azure OpenAI integration** cho AI features
 
 ### **Frontend (Vanilla JS)**
 - **Single Page Application** với hash routing
@@ -186,10 +195,7 @@ users (accounts chính)
 - `POST /api/mms-tts/generate` - Tạo audio với Facebook MMS-TTS-VIE
 - `GET /api/mms-tts/status` - Trạng thái Facebook MMS-TTS-VIE
 
-### **ChromaDB Context Management**
-- `GET /api/chroma/status` - Trạng thái ChromaDB
-- `GET /api/chroma/chat-summary/{profile_id}` - Summary chat history
-- `DELETE /api/chroma/chat-history/{profile_id}` - Xóa chat history
+
 
 ### **Foods (Admin only)**
 - `GET /api/foods` - Danh sách thực phẩm
@@ -229,7 +235,7 @@ users (accounts chính)
 - [x] ✅ Admin management system
 - [x] ✅ Security và authentication
 - [x] ✅ Multi-platform Text-to-Speech (Azure + Facebook MMS-TTS-VIE)
-- [x] ✅ ChromaDB Context Management cho chat history thông minh
+- [x] ✅ Kiến trúc AI nâng cao với LangChain Agent và Pinecone Vector Store
 
 ## 📝 License
 
