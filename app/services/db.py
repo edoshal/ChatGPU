@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "chatgpu.db"))
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _now() -> str:
@@ -61,6 +61,11 @@ def init_db(seed: bool = True) -> None:
                 "chat_sessions",
                 "documents",
                 "health_profiles",
+                "health_plans",
+                "health_plan_activities",
+                "health_plan_meals",
+                "activity_logs",
+                "meal_logs",
                 "foods",
                 "user_sessions",
                 "users",
@@ -199,8 +204,132 @@ def init_db(seed: bool = True) -> None:
             """
         )
         
+        # 8. HEALTH_PLANS - Kế hoạch sức khỏe
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_plans (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              health_profile_id INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              goal_type TEXT CHECK(goal_type IN ('weight_gain', 'weight_loss', 'muscle_gain', 'endurance', 'recovery', 'maintenance')) NOT NULL,
+              target_value REAL,  -- Mục tiêu (kg, %, etc.)
+              target_unit TEXT,   -- Đơn vị (kg, %, days)
+              duration_days INTEGER NOT NULL,  -- Thời gian (ngày)
+              start_date TEXT NOT NULL,
+              end_date TEXT NOT NULL,
+              current_progress REAL DEFAULT 0,
+              status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paused', 'completed', 'cancelled')),
+              available_activities_json TEXT,  -- Hoạt động người dùng có thể thực hiện
+              dietary_restrictions_json TEXT,  -- Hạn chế ăn uống
+              ai_analysis_json TEXT,  -- Phân tích AI ban đầu
+              created_at TEXT,
+              updated_at TEXT,
+              FOREIGN KEY(health_profile_id) REFERENCES health_profiles(id) ON DELETE CASCADE
+            );
+            """
+        )
+        
+        # 9. HEALTH_PLAN_ACTIVITIES - Hoạt động tập luyện trong kế hoạch
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_plan_activities (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              health_plan_id INTEGER NOT NULL,
+              date TEXT NOT NULL,  -- Ngày thực hiện (YYYY-MM-DD)
+              activity_type TEXT NOT NULL,  -- swimming, football, gym, etc.
+              activity_name TEXT NOT NULL,
+              duration_minutes INTEGER,
+              intensity TEXT CHECK(intensity IN ('low', 'medium', 'high')),
+              calories_target REAL,
+              instructions TEXT,
+              is_completed BOOLEAN DEFAULT 0,
+              completed_at TEXT,
+              actual_duration_minutes INTEGER,
+              actual_intensity TEXT,
+              notes TEXT,
+              created_at TEXT,
+              FOREIGN KEY(health_plan_id) REFERENCES health_plans(id) ON DELETE CASCADE
+            );
+            """
+        )
+        
+        # 10. HEALTH_PLAN_MEALS - Bữa ăn trong kế hoạch
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_plan_meals (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              health_plan_id INTEGER NOT NULL,
+              date TEXT NOT NULL,  -- Ngày ăn (YYYY-MM-DD)
+              meal_type TEXT CHECK(meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')) NOT NULL,
+              food_items_json TEXT,  -- Danh sách thực phẩm
+              total_calories REAL,
+              macros_json TEXT,  -- protein, carbs, fat
+              preparation_notes TEXT,
+              is_completed BOOLEAN DEFAULT 0,
+              completed_at TEXT,
+              actual_foods_json TEXT,  -- Thực phẩm thực tế đã ăn
+              deviation_notes TEXT,  -- Ghi chú về sự khác biệt
+              created_at TEXT,
+              FOREIGN KEY(health_plan_id) REFERENCES health_plans(id) ON DELETE CASCADE
+            );
+            """
+        )
+        
+        # 11. ACTIVITY_LOGS - Lịch sử hoạt động thực tế
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS activity_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              health_profile_id INTEGER NOT NULL,
+              activity_plan_id INTEGER,  -- Link tới kế hoạch (nếu có)
+              date TEXT NOT NULL,
+              activity_type TEXT NOT NULL,
+              activity_name TEXT NOT NULL,
+              duration_minutes INTEGER,
+              intensity TEXT,
+              calories_burned REAL,
+              notes TEXT,
+              source TEXT DEFAULT 'manual',  -- manual, chat, auto
+              logged_at TEXT,
+              FOREIGN KEY(health_profile_id) REFERENCES health_profiles(id) ON DELETE CASCADE,
+              FOREIGN KEY(activity_plan_id) REFERENCES health_plan_activities(id)
+            );
+            """
+        )
+        
+        # 12. MEAL_LOGS - Lịch sử bữa ăn thực tế
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meal_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              health_profile_id INTEGER NOT NULL,
+              meal_plan_id INTEGER,  -- Link tới kế hoạch (nếu có)
+              date TEXT NOT NULL,
+              meal_type TEXT NOT NULL,
+              food_items_json TEXT,
+              total_calories REAL,
+              notes TEXT,
+              source TEXT DEFAULT 'manual',  -- manual, chat, auto
+              logged_at TEXT,
+              FOREIGN KEY(health_profile_id) REFERENCES health_profiles(id) ON DELETE CASCADE,
+              FOREIGN KEY(meal_plan_id) REFERENCES health_plan_meals(id)
+            );
+            """
+        )
+        
         # Indexes for performance
         cur.execute("CREATE INDEX IF NOT EXISTS idx_health_profiles_user ON health_profiles(user_id);")
+        
+        # Health planning indexes
+        try:
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_plans_profile ON health_plans(health_profile_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_health_plans_dates ON health_plans(start_date, end_date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_plan_activities_plan_date ON health_plan_activities(health_plan_id, date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_plan_meals_plan_date ON health_plan_meals(health_plan_id, date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_profile_date ON activity_logs(health_profile_id, date);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_meal_logs_profile_date ON meal_logs(health_profile_id, date);")
+        except sqlite3.OperationalError:
+            pass
         try:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_profile ON documents(health_profile_id);")
         except sqlite3.OperationalError:
@@ -666,4 +795,399 @@ def get_user_stats(user_id: int) -> Dict[str, int]:
         
         return {"profiles": profiles, "documents": docs, "chat_sessions": sessions}
 
+
+# ====== HEALTH PLANNING FUNCTIONS ======
+
+def create_health_plan(
+    health_profile_id: int,
+    title: str,
+    goal_type: str,
+    target_value: float,
+    target_unit: str,
+    duration_days: int,
+    start_date: str,
+    available_activities: List[str] = None,
+    dietary_restrictions: List[str] = None,
+    ai_analysis: Dict[str, Any] = None
+) -> int:
+    """Tạo kế hoạch sức khỏe mới"""
+    from datetime import datetime, timedelta
+    
+    start_dt = datetime.fromisoformat(start_date)
+    end_dt = start_dt + timedelta(days=duration_days)
+    
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO health_plans (
+                health_profile_id, title, goal_type, target_value, target_unit,
+                duration_days, start_date, end_date, current_progress, status,
+                available_activities_json, dietary_restrictions_json, ai_analysis_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                health_profile_id, title, goal_type, target_value, target_unit,
+                duration_days, start_date, end_dt.isoformat(), 0.0, "active",
+                json.dumps(available_activities or [], ensure_ascii=False),
+                json.dumps(dietary_restrictions or [], ensure_ascii=False),
+                json.dumps(ai_analysis or {}, ensure_ascii=False),
+                _now(), _now()
+            )
+        )
+        return cur.lastrowid
+
+def get_health_plans(health_profile_id: int, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lấy danh sách kế hoạch sức khỏe"""
+    with get_conn() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM health_plans WHERE health_profile_id = ? AND status = ? ORDER BY created_at DESC",
+                (health_profile_id, status)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM health_plans WHERE health_profile_id = ? ORDER BY created_at DESC",
+                (health_profile_id,)
+            ).fetchall()
+        
+        plans = []
+        for row in rows:
+            plan = dict(row)
+            # Parse JSON fields
+            for field in ['available_activities_json', 'dietary_restrictions_json', 'ai_analysis_json']:
+                try:
+                    plan[field.replace('_json', '')] = json.loads(plan[field]) if plan[field] else []
+                except Exception:
+                    plan[field.replace('_json', '')] = []
+            plans.append(plan)
+        return plans
+
+def get_health_plan(plan_id: int, health_profile_id: int) -> Optional[Dict[str, Any]]:
+    """Lấy chi tiết kế hoạch sức khỏe"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM health_plans WHERE id = ? AND health_profile_id = ?",
+            (plan_id, health_profile_id)
+        ).fetchone()
+        
+        if not row:
+            return None
+            
+        plan = dict(row)
+        # Parse JSON fields
+        for field in ['available_activities_json', 'dietary_restrictions_json', 'ai_analysis_json']:
+            try:
+                plan[field.replace('_json', '')] = json.loads(plan[field]) if plan[field] else []
+            except Exception:
+                plan[field.replace('_json', '')] = []
+        return plan
+
+def update_health_plan(plan_id: int, health_profile_id: int, **updates) -> bool:
+    """Cập nhật kế hoạch sức khỏe"""
+    if not updates:
+        return True
+        
+    # Build dynamic UPDATE query
+    set_clauses = []
+    values = []
+    
+    for key, value in updates.items():
+        if key in ['title', 'status', 'current_progress', 'target_value']:
+            set_clauses.append(f"{key} = ?")
+            values.append(value)
+    
+    if not set_clauses:
+        return True
+        
+    set_clauses.append("updated_at = ?")
+    values.append(_now())
+    values.extend([plan_id, health_profile_id])
+    
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE health_plans SET {', '.join(set_clauses)} WHERE id = ? AND health_profile_id = ?",
+            values
+        )
+        return conn.total_changes > 0
+
+def delete_health_plan(plan_id: int, health_profile_id: int) -> bool:
+    """Xóa kế hoạch sức khỏe"""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM health_plans WHERE id = ? AND health_profile_id = ?",
+            (plan_id, health_profile_id)
+        )
+        return conn.total_changes > 0
+
+# ====== ACTIVITY PLANNING ======
+
+def add_plan_activity(
+    health_plan_id: int,
+    date: str,
+    activity_type: str,
+    activity_name: str,
+    duration_minutes: int,
+    intensity: str,
+    calories_target: Optional[float] = None,
+    instructions: Optional[str] = None
+) -> int:
+    """Thêm hoạt động vào kế hoạch"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO health_plan_activities (
+                health_plan_id, date, activity_type, activity_name,
+                duration_minutes, intensity, calories_target, instructions, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                health_plan_id, date, activity_type, activity_name,
+                duration_minutes, intensity, calories_target, instructions, _now()
+            )
+        )
+        return cur.lastrowid
+
+def get_plan_activities(health_plan_id: int, date: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lấy hoạt động trong kế hoạch"""
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                "SELECT * FROM health_plan_activities WHERE health_plan_id = ? AND date = ? ORDER BY created_at",
+                (health_plan_id, date)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM health_plan_activities WHERE health_plan_id = ? ORDER BY date, created_at",
+                (health_plan_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+def complete_plan_activity(activity_id: int, actual_duration: int, actual_intensity: str, notes: Optional[str] = None) -> bool:
+    """Hoàn thành hoạt động trong kế hoạch"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE health_plan_activities 
+            SET is_completed = 1, completed_at = ?, actual_duration_minutes = ?, actual_intensity = ?, notes = ?
+            WHERE id = ?
+            """,
+            (_now(), actual_duration, actual_intensity, notes, activity_id)
+        )
+        return conn.total_changes > 0
+
+def update_plan_activity(
+    activity_id: int,
+    activity_type: Optional[str] = None,
+    activity_name: Optional[str] = None,
+    duration_minutes: Optional[int] = None,
+    intensity: Optional[str] = None,
+    calories_target: Optional[float] = None,
+    instructions: Optional[str] = None
+) -> bool:
+    """Cập nhật thuộc tính hoạt động trong kế hoạch"""
+    fields = []
+    values = []
+    if activity_type is not None:
+        fields.append("activity_type = ?"); values.append(activity_type)
+    if activity_name is not None:
+        fields.append("activity_name = ?"); values.append(activity_name)
+    if duration_minutes is not None:
+        fields.append("duration_minutes = ?"); values.append(duration_minutes)
+    if intensity is not None:
+        fields.append("intensity = ?"); values.append(intensity)
+    if calories_target is not None:
+        fields.append("calories_target = ?"); values.append(calories_target)
+    if instructions is not None:
+        fields.append("instructions = ?"); values.append(instructions)
+    if not fields:
+        return False
+    with get_conn() as conn:
+        sql = f"UPDATE health_plan_activities SET {', '.join(fields)} WHERE id = ?"
+        conn.execute(sql, (*values, activity_id))
+        return conn.total_changes > 0
+
+# ====== MEAL PLANNING ======
+
+def add_plan_meal(
+    health_plan_id: int,
+    date: str,
+    meal_type: str,
+    food_items: List[Dict[str, Any]],
+    total_calories: Optional[float] = None,
+    macros: Optional[Dict[str, float]] = None,
+    preparation_notes: Optional[str] = None
+) -> int:
+    """Thêm bữa ăn vào kế hoạch"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO health_plan_meals (
+                health_plan_id, date, meal_type, food_items_json,
+                total_calories, macros_json, preparation_notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                health_plan_id, date, meal_type, json.dumps(food_items, ensure_ascii=False),
+                total_calories, json.dumps(macros or {}, ensure_ascii=False), preparation_notes, _now()
+            )
+        )
+        return cur.lastrowid
+
+def get_plan_meals(health_plan_id: int, date: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lấy bữa ăn trong kế hoạch"""
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                "SELECT * FROM health_plan_meals WHERE health_plan_id = ? AND date = ? ORDER BY meal_type",
+                (health_plan_id, date)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM health_plan_meals WHERE health_plan_id = ? ORDER BY date, meal_type",
+                (health_plan_id,)
+            ).fetchall()
+        
+        meals = []
+        for row in rows:
+            meal = dict(row)
+            # Parse JSON fields
+            try:
+                meal['food_items'] = json.loads(meal['food_items_json']) if meal['food_items_json'] else []
+            except Exception:
+                meal['food_items'] = []
+            try:
+                meal['macros'] = json.loads(meal['macros_json']) if meal['macros_json'] else {}
+            except Exception:
+                meal['macros'] = {}
+            meals.append(meal)
+        return meals
+
+def complete_plan_meal(meal_id: int, actual_foods: List[Dict[str, Any]], deviation_notes: Optional[str] = None) -> bool:
+    """Hoàn thành bữa ăn trong kế hoạch"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE health_plan_meals 
+            SET is_completed = 1, completed_at = ?, actual_foods_json = ?, deviation_notes = ?
+            WHERE id = ?
+            """,
+            (_now(), json.dumps(actual_foods, ensure_ascii=False), deviation_notes, meal_id)
+        )
+        return conn.total_changes > 0
+
+# ====== ACTIVITY & MEAL LOGGING ======
+
+def log_activity(
+    health_profile_id: int,
+    date: str,
+    activity_type: str,
+    activity_name: str,
+    duration_minutes: int,
+    intensity: str,
+    calories_burned: Optional[float] = None,
+    notes: Optional[str] = None,
+    source: str = "manual",
+    activity_plan_id: Optional[int] = None
+) -> int:
+    """Ghi nhận hoạt động đã thực hiện"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO activity_logs (
+                health_profile_id, activity_plan_id, date, activity_type, activity_name,
+                duration_minutes, intensity, calories_burned, notes, source, logged_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                health_profile_id, activity_plan_id, date, activity_type, activity_name,
+                duration_minutes, intensity, calories_burned, notes, source, _now()
+            )
+        )
+        return cur.lastrowid
+
+def log_meal(
+    health_profile_id: int,
+    date: str,
+    meal_type: str,
+    food_items: List[Dict[str, Any]],
+    total_calories: Optional[float] = None,
+    notes: Optional[str] = None,
+    source: str = "manual",
+    meal_plan_id: Optional[int] = None
+) -> int:
+    """Ghi nhận bữa ăn đã thực hiện"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO meal_logs (
+                health_profile_id, meal_plan_id, date, meal_type,
+                food_items_json, total_calories, notes, source, logged_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                health_profile_id, meal_plan_id, date, meal_type,
+                json.dumps(food_items, ensure_ascii=False), total_calories, notes, source, _now()
+            )
+        )
+        return cur.lastrowid
+
+def get_activity_logs(health_profile_id: int, date: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Lấy lịch sử hoạt động"""
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                "SELECT * FROM activity_logs WHERE health_profile_id = ? AND date = ? ORDER BY logged_at DESC LIMIT ?",
+                (health_profile_id, date, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM activity_logs WHERE health_profile_id = ? ORDER BY date DESC, logged_at DESC LIMIT ?",
+                (health_profile_id, limit)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+def get_meal_logs(health_profile_id: int, date: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Lấy lịch sử bữa ăn"""
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                "SELECT * FROM meal_logs WHERE health_profile_id = ? AND date = ? ORDER BY logged_at DESC LIMIT ?",
+                (health_profile_id, date, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM meal_logs WHERE health_profile_id = ? ORDER BY date DESC, logged_at DESC LIMIT ?",
+                (health_profile_id, limit)
+            ).fetchall()
+        
+        meals = []
+        for row in rows:
+            meal = dict(row)
+            try:
+                meal['food_items'] = json.loads(meal['food_items_json']) if meal['food_items_json'] else []
+            except Exception:
+                meal['food_items'] = []
+            meals.append(meal)
+        return meals
+
+def get_daily_plan_summary(health_plan_id: int, date: str) -> Dict[str, Any]:
+    """Lấy tóm tắt kế hoạch hàng ngày"""
+    activities = get_plan_activities(health_plan_id, date)
+    meals = get_plan_meals(health_plan_id, date)
+    
+    total_calories_target = sum(meal.get('total_calories', 0) for meal in meals)
+    
+    # Calculate completion rate
+    total_tasks = len(activities) + len(meals)
+    completed_tasks = sum(1 for a in activities if a.get('is_completed')) + sum(1 for m in meals if m.get('is_completed'))
+    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+    
+    return {
+        "date": date,
+        "activities": activities,
+        "meals": meals,
+        "total_calories_target": total_calories_target,
+        "completion_rate": completion_rate
+    }
 

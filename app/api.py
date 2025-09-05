@@ -22,8 +22,13 @@ from .services import azure_openai as llm
 from .services import langchain_agent
 from .services import tts
 from .services import mms_tts
+from .services import health_planner
 
 from .services import pinecone_db
+from .models.schema import (
+    HealthPlanCreate, HealthPlanUpdate, ActivityLog, MealLog,
+    GoalType, PlanStatus, IntensityLevel, MealType, ActivityUpdate
+)
 
 
 # Setup logger
@@ -890,6 +895,319 @@ def get_system_stats(admin_user=Depends(require_admin)):
 def get_my_stats(current_user=Depends(get_current_user)):
     """Lấy thống kê cá nhân"""
     return db.get_user_stats(current_user["id"])
+
+
+# ====== HEALTH PLANNING ENDPOINTS ======
+
+@app.get("/api/profiles/{profile_id}/health-plans")
+def list_health_plans(profile_id: int, status: Optional[str] = None, profile=Depends(get_user_profile)):
+    """Lấy danh sách kế hoạch sức khỏe"""
+    plans = db.get_health_plans(profile_id, status)
+    return plans
+
+@app.post("/api/profiles/{profile_id}/health-plans")
+def create_health_plan(profile_id: int, data: HealthPlanCreate, profile=Depends(get_user_profile)):
+    """Tạo kế hoạch sức khỏe mới"""
+    try:
+        # Lấy thông tin profile để truyền cho AI
+        profile_data = dict(profile)
+        
+        # Tạo kế hoạch với AI
+        plan_id, ai_analysis = health_planner.health_planner_service.create_health_plan(
+            health_profile_id=profile_id,
+            title=data.title,
+            goal_type=data.goal_type.value,
+            target_value=data.target_value,
+            target_unit=data.target_unit,
+            duration_days=data.duration_days,
+            start_date=data.start_date,
+            available_activities=data.available_activities,
+            dietary_restrictions=data.dietary_restrictions,
+            profile_data=profile_data
+        )
+        
+        return {
+            "message": "Tạo kế hoạch thành công",
+            "plan_id": plan_id,
+            "ai_analysis": ai_analysis
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi tạo kế hoạch: {str(e)}")
+
+@app.get("/api/profiles/{profile_id}/health-plans/{plan_id}")
+def get_health_plan_detail(profile_id: int, plan_id: int, profile=Depends(get_user_profile)):
+    """Lấy chi tiết kế hoạch sức khỏe"""
+    plan = db.get_health_plan(plan_id, profile_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    return plan
+
+@app.put("/api/profiles/{profile_id}/health-plans/{plan_id}")
+def update_health_plan(profile_id: int, plan_id: int, data: HealthPlanUpdate, profile=Depends(get_user_profile)):
+    """Cập nhật kế hoạch sức khỏe"""
+    updates = data.dict(exclude_unset=True)
+    success = db.update_health_plan(plan_id, profile_id, **updates)
+    if not success:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    return {"message": "Cập nhật kế hoạch thành công"}
+
+@app.delete("/api/profiles/{profile_id}/health-plans/{plan_id}")
+def delete_health_plan(profile_id: int, plan_id: int, profile=Depends(get_user_profile)):
+    """Xóa kế hoạch sức khỏe"""
+    success = db.delete_health_plan(plan_id, profile_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    return {"message": "Xóa kế hoạch thành công"}
+
+# ====== DAILY PLAN & ACTIVITIES ======
+
+@app.get("/api/health-plans/{plan_id}/daily/{date}")
+def get_daily_plan(plan_id: int, date: str, current_user=Depends(get_current_user)):
+    """Lấy kế hoạch hàng ngày"""
+    # Verify ownership
+    with db.get_conn() as conn:
+        plan = conn.execute(
+            """
+            SELECT hp.* FROM health_plans hp
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hp.id = ? AND hpr.user_id = ?
+            """,
+            (plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not plan:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    
+    summary = db.get_daily_plan_summary(plan_id, date)
+    return summary
+
+@app.get("/api/health-plans/{plan_id}/activities")
+def get_plan_activities(plan_id: int, date: Optional[str] = None, current_user=Depends(get_current_user)):
+    """Lấy hoạt động trong kế hoạch"""
+    # Verify ownership
+    with db.get_conn() as conn:
+        plan = conn.execute(
+            """
+            SELECT hp.* FROM health_plans hp
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hp.id = ? AND hpr.user_id = ?
+            """,
+            (plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not plan:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    
+    activities = db.get_plan_activities(plan_id, date)
+    return activities
+
+@app.put("/api/health-plans/{plan_id}/activities/{activity_id}")
+def update_plan_activity_endpoint(
+    plan_id: int,
+    activity_id: int,
+    data: ActivityUpdate,
+    current_user=Depends(get_current_user)
+):
+    """Cập nhật hoạt động trong kế hoạch (đổi bộ môn, thời lượng, cường độ, ...)."""
+    # Verify ownership
+    with db.get_conn() as conn:
+        activity = conn.execute(
+            """
+            SELECT hpa.* FROM health_plan_activities hpa
+            JOIN health_plans hp ON hpa.health_plan_id = hp.id
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hpa.id = ? AND hp.id = ? AND hpr.user_id = ?
+            """,
+            (activity_id, plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not activity:
+        raise HTTPException(status_code=404, detail="Hoạt động không tìm thấy")
+
+    ok = db.update_plan_activity(
+        activity_id=activity_id,
+        activity_type=data.activity_type,
+        activity_name=data.activity_name,
+        duration_minutes=data.duration_minutes,
+        intensity=data.intensity.value if getattr(data, 'intensity', None) else None,
+        calories_target=data.calories_target,
+        instructions=data.instructions
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Không có thay đổi để cập nhật")
+    return {"message": "Cập nhật hoạt động thành công"}
+
+@app.post("/api/health-plans/{plan_id}/activities/{activity_id}/complete")
+def complete_activity(
+    plan_id: int, 
+    activity_id: int, 
+    actual_duration: int,
+    actual_intensity: str,
+    notes: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Hoàn thành hoạt động"""
+    # Verify ownership
+    with db.get_conn() as conn:
+        activity = conn.execute(
+            """
+            SELECT hpa.* FROM health_plan_activities hpa
+            JOIN health_plans hp ON hpa.health_plan_id = hp.id
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hpa.id = ? AND hp.id = ? AND hpr.user_id = ?
+            """,
+            (activity_id, plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not activity:
+        raise HTTPException(status_code=404, detail="Hoạt động không tìm thấy")
+    
+    success = db.complete_plan_activity(activity_id, actual_duration, actual_intensity, notes)
+    if not success:
+        raise HTTPException(status_code=400, detail="Không thể hoàn thành hoạt động")
+    
+    return {"message": "Hoàn thành hoạt động thành công"}
+
+@app.get("/api/health-plans/{plan_id}/meals")
+def get_plan_meals(plan_id: int, date: Optional[str] = None, current_user=Depends(get_current_user)):
+    """Lấy bữa ăn trong kế hoạch"""
+    # Verify ownership
+    with db.get_conn() as conn:
+        plan = conn.execute(
+            """
+            SELECT hp.* FROM health_plans hp
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hp.id = ? AND hpr.user_id = ?
+            """,
+            (plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not plan:
+        raise HTTPException(status_code=404, detail="Kế hoạch không tìm thấy")
+    
+    meals = db.get_plan_meals(plan_id, date)
+    return meals
+
+@app.post("/api/health-plans/{plan_id}/meals/{meal_id}/complete")
+def complete_meal(
+    plan_id: int,
+    meal_id: int,
+    actual_foods: List[Dict[str, Any]],
+    deviation_notes: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    """Hoàn thành bữa ăn"""
+    # Verify ownership
+    with db.get_conn() as conn:
+        meal = conn.execute(
+            """
+            SELECT hpm.* FROM health_plan_meals hpm
+            JOIN health_plans hp ON hpm.health_plan_id = hp.id
+            JOIN health_profiles hpr ON hp.health_profile_id = hpr.id
+            WHERE hpm.id = ? AND hp.id = ? AND hpr.user_id = ?
+            """,
+            (meal_id, plan_id, current_user["id"])
+        ).fetchone()
+    
+    if not meal:
+        raise HTTPException(status_code=404, detail="Bữa ăn không tìm thấy")
+    
+    success = db.complete_plan_meal(meal_id, actual_foods, deviation_notes)
+    if not success:
+        raise HTTPException(status_code=400, detail="Không thể hoàn thành bữa ăn")
+    
+    return {"message": "Hoàn thành bữa ăn thành công"}
+
+# ====== ACTIVITY & MEAL LOGGING ======
+
+@app.post("/api/profiles/{profile_id}/activity-logs")
+def log_activity(profile_id: int, data: ActivityLog, profile=Depends(get_user_profile)):
+    """Ghi nhận hoạt động thực hiện"""
+    log_id = db.log_activity(
+        health_profile_id=profile_id,
+        date=data.date.isoformat(),
+        activity_type=data.activity_type,
+        activity_name=data.activity_name,
+        duration_minutes=data.duration_minutes,
+        intensity=data.intensity.value,
+        calories_burned=data.calories_burned,
+        notes=data.notes,
+        source=data.source,
+        activity_plan_id=data.activity_plan_id
+    )
+    return {"message": "Ghi nhận hoạt động thành công", "log_id": log_id}
+
+@app.post("/api/profiles/{profile_id}/meal-logs")
+def log_meal(profile_id: int, data: MealLog, profile=Depends(get_user_profile)):
+    """Ghi nhận bữa ăn thực hiện"""
+    log_id = db.log_meal(
+        health_profile_id=profile_id,
+        date=data.date.isoformat(),
+        meal_type=data.meal_type.value,
+        food_items=data.food_items,
+        total_calories=data.total_calories,
+        notes=data.notes,
+        source=data.source,
+        meal_plan_id=data.meal_plan_id
+    )
+    return {"message": "Ghi nhận bữa ăn thành công", "log_id": log_id}
+
+@app.get("/api/profiles/{profile_id}/activity-logs")
+def get_activity_logs(profile_id: int, date: Optional[str] = None, limit: int = 50, profile=Depends(get_user_profile)):
+    """Lấy lịch sử hoạt động"""
+    logs = db.get_activity_logs(profile_id, date, limit)
+    return logs
+
+@app.get("/api/profiles/{profile_id}/meal-logs")
+def get_meal_logs(profile_id: int, date: Optional[str] = None, limit: int = 50, profile=Depends(get_user_profile)):
+    """Lấy lịch sử bữa ăn"""
+    logs = db.get_meal_logs(profile_id, date, limit)
+    return logs
+
+# ====== PLAN ADJUSTMENT ======
+
+class PlanAdjustmentRequest(BaseModel):
+    """Yêu cầu điều chỉnh kế hoạch"""
+    target_date: str = Field(..., description="Ngày bắt đầu điều chỉnh (YYYY-MM-DD)")
+    adjustment_days: int = Field(default=7, ge=1, le=30, description="Số ngày điều chỉnh")
+    reason: Optional[str] = Field(None, description="Lý do điều chỉnh")
+
+@app.post("/api/profiles/{profile_id}/health-plans/{plan_id}/adjust")
+def adjust_health_plan(
+    profile_id: int,
+    plan_id: int,
+    data: PlanAdjustmentRequest,
+    profile=Depends(get_user_profile)
+):
+    """Tự động điều chỉnh kế hoạch dựa trên hoạt động thực tế"""
+    try:
+        from datetime import datetime
+        
+        # Parse target date
+        target_date = datetime.fromisoformat(data.target_date).date()
+        
+        # Lấy hoạt động và bữa ăn gần đây
+        recent_activities = db.get_activity_logs(profile_id, limit=20)
+        recent_meals = db.get_meal_logs(profile_id, limit=20)
+        
+        # Điều chỉnh kế hoạch với AI
+        result = health_planner.health_planner_service.adjust_plan_based_on_feedback(
+            plan_id=plan_id,
+            health_profile_id=profile_id,
+            actual_activities=recent_activities,
+            actual_meals=recent_meals,
+            target_date=target_date,
+            adjustment_days=data.adjustment_days
+        )
+        
+        return {
+            "message": "Điều chỉnh kế hoạch thành công",
+            "adjustment_result": result
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi điều chỉnh kế hoạch: {str(e)}")
 
 
 # ====== ERROR HANDLERS ======

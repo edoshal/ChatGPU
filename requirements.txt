@@ -17,7 +17,7 @@ torchaudio>=2.0.0
 librosa>=0.10.0
 numpy>=1.24.0
 scipy>=1.10.0
-chromadb>=0.4.0
+chromadb>=0.4.0,<0.5.0
 
 # LangChain libraries
 langchain>=0.2.0

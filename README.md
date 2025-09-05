@@ -114,7 +114,7 @@ uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 
 - **Web App**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Admin Account**: `admin@chatgpu.local` / `admin123`
+- **Admin Account**: `admin@example.com` / `admin123`
 
 ## 📚 Hướng dẫn sử dụng
 

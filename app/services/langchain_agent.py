@@ -71,7 +71,199 @@ def create_chatbot_agent(user_id: int, profile_id: int, session_data: Dict[str, 
         db.update_health_profile(profile_id, user_id, **update_data)
         return {"success": True, "message": "Đã cập nhật tình trạng sức khỏe thành công.", "updated_fields": list(update_data.keys())}
 
-    tools = [search_food_database, update_health_status]
+    @tool
+    def log_daily_activity(activity_name: str, duration_minutes: int, intensity: str = "medium", notes: str = "") -> Dict[str, Any]:
+        """Ghi nhận hoạt động thể thao đã thực hiện hôm nay. Sử dụng khi người dùng báo cáo đã tập luyện, chơi thể thao."""
+        from datetime import date
+        import re
+        
+        # Validate intensity
+        valid_intensities = ["low", "medium", "high"]
+        if intensity.lower() not in valid_intensities:
+            intensity = "medium"
+        
+        # Estimate activity type based on name
+        activity_type = "general"
+        activity_lower = activity_name.lower()
+        if any(word in activity_lower for word in ["bơi", "swim"]):
+            activity_type = "swimming"
+        elif any(word in activity_lower for word in ["chạy", "run", "jog"]):
+            activity_type = "running"
+        elif any(word in activity_lower for word in ["đá bóng", "football", "soccer"]):
+            activity_type = "football"
+        elif any(word in activity_lower for word in ["cầu lông", "badminton"]):
+            activity_type = "badminton"
+        elif any(word in activity_lower for word in ["gym", "tập gym", "tạ"]):
+            activity_type = "gym"
+        elif any(word in activity_lower for word in ["đi bộ", "walk"]):
+            activity_type = "walking"
+        elif any(word in activity_lower for word in ["yoga"]):
+            activity_type = "yoga"
+        
+        # Estimate calories (rough calculation)
+        calories_map = {
+            "swimming": 8, "running": 10, "football": 7, "badminton": 6,
+            "gym": 6, "walking": 4, "yoga": 3, "general": 5
+        }
+        intensity_multiplier = {"low": 0.7, "medium": 1.0, "high": 1.3}
+        
+        calories_burned = duration_minutes * calories_map.get(activity_type, 5) * intensity_multiplier.get(intensity, 1.0)
+        
+        try:
+            log_id = db.log_activity(
+                health_profile_id=profile_id,
+                date=date.today().isoformat(),
+                activity_type=activity_type,
+                activity_name=activity_name,
+                duration_minutes=duration_minutes,
+                intensity=intensity.lower(),
+                calories_burned=calories_burned,
+                notes=notes,
+                source="chat"
+            )
+            return {
+                "success": True,
+                "message": f"Đã ghi nhận hoạt động '{activity_name}' ({duration_minutes} phút, {intensity})",
+                "log_id": log_id,
+                "estimated_calories": round(calories_burned, 1)
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    @tool
+    def log_daily_meal(meal_type: str, food_description: str, estimated_calories: int = None, notes: str = "") -> Dict[str, Any]:
+        """Ghi nhận bữa ăn đã thực hiện. Sử dụng khi người dùng báo cáo đã ăn gì."""
+        from datetime import date
+        
+        # Validate meal type
+        valid_meals = ["breakfast", "lunch", "dinner", "snack"]
+        meal_lower = meal_type.lower()
+        if "sáng" in meal_lower or "breakfast" in meal_lower:
+            meal_type = "breakfast"
+        elif "trưa" in meal_lower or "lunch" in meal_lower:
+            meal_type = "lunch"
+        elif "tối" in meal_lower or "dinner" in meal_lower:
+            meal_type = "dinner"
+        elif "snack" in meal_lower or "ăn vặt" in meal_lower:
+            meal_type = "snack"
+        else:
+            meal_type = "snack"  # default
+        
+        # Parse food items from description
+        food_items = [{
+            "name": food_description,
+            "amount": "1 phần",
+            "calories": estimated_calories or 300,  # default estimate
+            "source": "user_report"
+        }]
+        
+        try:
+            log_id = db.log_meal(
+                health_profile_id=profile_id,
+                date=date.today().isoformat(),
+                meal_type=meal_type,
+                food_items=food_items,
+                total_calories=estimated_calories,
+                notes=notes,
+                source="chat"
+            )
+            return {
+                "success": True,
+                "message": f"Đã ghi nhận bữa {meal_type}: {food_description}",
+                "log_id": log_id
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    @tool
+    def get_active_health_plans() -> Dict[str, Any]:
+        """Lấy kế hoạch sức khỏe đang hoạt động của người dùng."""
+        try:
+            plans = db.get_health_plans(profile_id, status="active")
+            if not plans:
+                return {"message": "Hiện tại chưa có kế hoạch sức khỏe nào đang hoạt động."}
+            
+            active_plan = plans[0]  # Get the most recent active plan
+            return {
+                "plan_id": active_plan["id"],
+                "title": active_plan["title"],
+                "goal_type": active_plan["goal_type"],
+                "target_value": active_plan["target_value"],
+                "target_unit": active_plan["target_unit"],
+                "current_progress": active_plan["current_progress"],
+                "start_date": active_plan["start_date"],
+                "end_date": active_plan["end_date"]
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    @tool
+    def get_today_plan_summary() -> Dict[str, Any]:
+        """Lấy tóm tắt kế hoạch hôm nay (hoạt động và bữa ăn)."""
+        from datetime import date
+        
+        try:
+            # Get active plan
+            plans = db.get_health_plans(profile_id, status="active")
+            if not plans:
+                return {"message": "Chưa có kế hoạch sức khỏe đang hoạt động."}
+            
+            plan_id = plans[0]["id"]
+            today = date.today().isoformat()
+            
+            summary = db.get_daily_plan_summary(plan_id, today)
+            
+            return {
+                "date": today,
+                "total_activities": len(summary["activities"]),
+                "completed_activities": len([a for a in summary["activities"] if a.get("is_completed")]),
+                "total_meals": len(summary["meals"]),
+                "completed_meals": len([m for m in summary["meals"] if m.get("is_completed")]),
+                "completion_rate": summary["completion_rate"],
+                "target_calories": summary["total_calories_target"]
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    
+    @tool
+    def complete_planned_activity(activity_description: str, actual_duration: int = None, notes: str = "") -> Dict[str, Any]:
+        """Đánh dấu hoàn thành hoạt động trong kế hoạch hôm nay. Sử dụng khi người dùng báo cáo đã thực hiện hoạt động theo kế hoạch."""
+        from datetime import date
+        
+        try:
+            # Get active plan
+            plans = db.get_health_plans(profile_id, status="active")
+            if not plans:
+                return {"message": "Chưa có kế hoạch sức khỏe đang hoạt động."}
+            
+            plan_id = plans[0]["id"]
+            today = date.today().isoformat()
+            
+            # Get today's activities
+            activities = db.get_plan_activities(plan_id, today)
+            
+            # Find matching activity
+            for activity in activities:
+                if not activity.get("is_completed") and activity_description.lower() in activity["activity_name"].lower():
+                    success = db.complete_plan_activity(
+                        activity["id"],
+                        actual_duration or activity["duration_minutes"],
+                        activity["intensity"],
+                        notes
+                    )
+                    if success:
+                        return {
+                            "success": True,
+                            "message": f"Đã hoàn thành hoạt động: {activity['activity_name']}",
+                            "activity_id": activity["id"]
+                        }
+            
+            return {"message": f"Không tìm thấy hoạt động '{activity_description}' trong kế hoạch hôm nay."}
+            
+        except Exception as e:
+            return {"error": str(e)}
+
+    tools = [search_food_database, update_health_status, log_daily_activity, log_daily_meal, get_active_health_plans, get_today_plan_summary, complete_planned_activity]
 
     # Khởi tạo LLM
     llm = AzureChatOpenAI(
@@ -107,6 +299,14 @@ def create_chatbot_agent(user_id: int, profile_id: int, session_data: Dict[str, 
    - Khuyến nghị tham khảo bác sĩ khi cần thiết
 
 {profile_context}
+
+TÍNH NĂNG THEO DÕI KẾ HOẠCH SỨC KHỊE:
+- Khi người dùng báo cáo hoạt động: Sử dụng log_daily_activity
+- Khi người dùng báo cáo bữa ăn: Sử dụng log_daily_meal  
+- Khi hỏi về kế hoạch: Sử dụng get_active_health_plans và get_today_plan_summary
+- Khi hoàn thành hoạt động theo kế hoạch: Sử dụng complete_planned_activity
+
+LUÔN phân tích sự khác biệt giữa kế hoạch và thực tế, đưa ra gợi ý điều chỉnh.
 
 Hãy trả lời một cách chuyên nghiệp, thân thiện và dựa trên bằng chứng khoa học."""
 

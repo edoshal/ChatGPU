@@ -271,6 +271,7 @@ const routes = {
     '/auth': () => renderAuth(),
     '/dashboard': () => renderDashboard(),
     // '/profiles': () => renderProfiles(), // Ẩn khỏi navbar; vẫn giữ route nếu cần truy cập từ nơi khác
+    '/health-plans': () => renderHealthPlans(),
     '/chat': () => renderChat(),
     '/documents': () => renderDocuments(),
     '/foods': () => renderFoods(),
@@ -283,7 +284,12 @@ function navigateTo(path) {
 }
 
 function getCurrentRoute() {
-    return window.location.hash.slice(1) || '/dashboard';
+    // Lấy đường dẫn từ hash và chuẩn hóa bỏ dấu "/" cuối nếu có
+    let path = window.location.hash.slice(1) || '/dashboard';
+    if (path.length > 1 && path.endsWith('/')) {
+        path = path.replace(/\/+$/, '');
+    }
+    return path;
 }
 
 async function handleRoute() {
@@ -421,10 +427,41 @@ async function createNewProfile() {
     }
 }
 
+// Render Functions
+async function renderHealthPlans() {
+    const container = $('#page-container');
+    
+    // Import health plans module dynamically
+    if (!window.healthPlansModule) {
+        try {
+            // Dùng đường dẫn tuyệt đối để tránh lỗi phân giải tương đối theo tài liệu HTML
+            const module = await import('/pages/health-plans.js');
+            window.healthPlansModule = module;
+        } catch (error) {
+            console.error('Failed to load health plans module:', error);
+            container.innerHTML = `
+                <div class="error-state">
+                    <h2>Không thể tải trang kế hoạch sức khỏe</h2>
+                    <p>Vui lòng thử lại sau.</p>
+                    <button class="btn btn-primary" onclick="window.location.reload()">Tải lại</button>
+                </div>
+            `;
+            return;
+        }
+    }
+    
+    // Render health plans page
+    container.innerHTML = window.healthPlansModule.createHealthPlansPage();
+    
+    // Initialize page functionality
+    window.healthPlansModule.initHealthPlansPage();
+}
+
 // Global Functions
 window.logout = logout;
 window.createNewProfile = createNewProfile;
 window.navigateTo = navigateTo;
+window.renderHealthPlans = renderHealthPlans;
 
 // Initialize App
 function initializeApp() {
