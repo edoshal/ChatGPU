@@ -2108,6 +2108,116 @@ body.modal-open {
   padding: 1rem;
 }
 
+/* Log Items */
+.log-item {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+.log-item:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-color: #007bff;
+}
+
+.log-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  margin-right: 0.75rem;
+  flex-shrink: 0;
+}
+
+.log-content {
+  flex: 1;
+}
+
+.log-content strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.25rem;
+}
+
+.log-details {
+  font-size: 0.875rem;
+  color: #666;
+  margin-bottom: 0.25rem;
+}
+
+.log-date {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.log-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 0.75rem;
+}
+
+.btn-delete {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: #dc3545;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+}
+
+.btn-delete:hover {
+  background: #c82333;
+  transform: scale(1.05);
+}
+
+.btn-delete:active {
+  transform: scale(0.95);
+}
+
+/* Logs Header */
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.logs-header h3 {
+  margin: 0;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  border-radius: 4px;
+}
+
+.btn-outline-primary {
+  color: #007bff;
+  border: 1px solid #007bff;
+  background: transparent;
+}
+
+.btn-outline-primary:hover {
+  color: white;
+  background: #007bff;
+}
+
 /* Loading States */
 .loading {
   display: flex;

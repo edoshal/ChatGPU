@@ -1191,3 +1191,115 @@ def get_daily_plan_summary(health_plan_id: int, date: str) -> Dict[str, Any]:
         "completion_rate": completion_rate
     }
 
+def delete_activity_log(log_id: int, health_profile_id: int) -> bool:
+    """Xóa activity log"""
+    with get_conn() as conn:
+        result = conn.execute(
+            "DELETE FROM activity_logs WHERE id = ? AND health_profile_id = ?",
+            (log_id, health_profile_id)
+        )
+        return result.rowcount > 0
+
+def delete_meal_log(log_id: int, health_profile_id: int) -> bool:
+    """Xóa meal log"""
+    with get_conn() as conn:
+        result = conn.execute(
+            "DELETE FROM meal_logs WHERE id = ? AND health_profile_id = ?",
+            (log_id, health_profile_id)
+        )
+        return result.rowcount > 0
+
+def auto_match_activity_with_plan(health_profile_id: int, activity_log_id: int) -> Optional[int]:
+    """Tự động match activity log với plan activity và đánh dấu hoàn thành"""
+    
+    with get_conn() as conn:
+        # Lấy thông tin activity log
+        activity_log = conn.execute(
+            "SELECT * FROM activity_logs WHERE id = ? AND health_profile_id = ?",
+            (activity_log_id, health_profile_id)
+        ).fetchone()
+        
+        if not activity_log:
+            return None
+            
+        activity_log = dict(activity_log)
+        
+        # Tìm kế hoạch đang active
+        active_plans = conn.execute(
+            """
+            SELECT hp.* FROM health_plans hp
+            WHERE hp.health_profile_id = ? AND hp.status = 'active'
+            AND hp.start_date <= ? AND hp.end_date >= ?
+            ORDER BY hp.created_at DESC
+            """,
+            (health_profile_id, activity_log['date'], activity_log['date'])
+        ).fetchall()
+        
+        if not active_plans:
+            return None
+            
+        plan = dict(active_plans[0])
+        
+        # Tìm plan activity phù hợp trong cùng ngày
+        plan_activities = conn.execute(
+            """
+            SELECT * FROM health_plan_activities 
+            WHERE health_plan_id = ? AND date = ? AND is_completed = 0
+            ORDER BY 
+                CASE 
+                    WHEN LOWER(activity_name) = LOWER(?) THEN 1
+                    WHEN LOWER(activity_type) = LOWER(?) THEN 2
+                    ELSE 3
+                END,
+                ABS(duration_minutes - ?) ASC
+            """,
+            (plan['id'], activity_log['date'], activity_log['activity_name'], 
+             activity_log['activity_type'], activity_log['duration_minutes'])
+        ).fetchall()
+        
+        if not plan_activities:
+            return None
+            
+        # Lấy plan activity phù hợp nhất
+        best_match = dict(plan_activities[0])
+        
+        # Đánh dấu hoàn thành với thông tin thực tế
+        success = complete_plan_activity(
+            activity_id=best_match['id'],
+            actual_duration=activity_log['duration_minutes'],
+            actual_intensity=activity_log['intensity'],
+            notes=f"Tự động từ activity log #{activity_log_id}: {activity_log['activity_name']}"
+        )
+        
+        if success:
+            return best_match['id']
+        else:
+            return None
+
+def find_similar_activities(activity_name: str, activity_type: str) -> List[str]:
+    """Tìm các hoạt động tương tự để matching"""
+    
+    # Map các hoạt động tương tự
+    activity_map = {
+        'gym': ['tập gym', 'gym', 'tạ', 'weight', 'strength'],
+        'running': ['chạy bộ', 'chạy', 'running', 'jog', 'jogging'],
+        'swimming': ['bơi lội', 'bơi', 'swimming', 'swim'],
+        'walking': ['đi bộ', 'walking', 'walk'],
+        'cycling': ['đạp xe', 'cycling', 'bike', 'bicycle'],
+        'football': ['đá bóng', 'football', 'soccer', 'bóng đá'],
+        'badminton': ['cầu lông', 'badminton'],
+        'yoga': ['yoga'],
+        'tennis': ['tennis', 'quần vợt']
+    }
+    
+    activity_lower = activity_name.lower()
+    type_lower = activity_type.lower()
+    
+    similar = [activity_name, activity_type]
+    
+    for category, keywords in activity_map.items():
+        if any(keyword in activity_lower or keyword in type_lower for keyword in keywords):
+            similar.extend(keywords)
+            
+    return list(set(similar))
+

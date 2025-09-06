@@ -4,6 +4,7 @@ Tạo kế hoạch sức khỏe tự động dựa trên profile người dùng 
 """
 import json
 import os
+import logging
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,6 +12,9 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from . import db
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class HealthPlannerService:
@@ -60,21 +64,39 @@ class HealthPlannerService:
         )
         
         # Tạo plan trong database
-        plan_id = db.create_health_plan(
-            health_profile_id=health_profile_id,
-            title=title,
-            goal_type=goal_type,
-            target_value=target_value,
-            target_unit=target_unit,
-            duration_days=duration_days,
-            start_date=start_date.isoformat(),
-            available_activities=available_activities,
-            dietary_restrictions=dietary_restrictions or [],
-            ai_analysis=ai_analysis
-        )
+        try:
+            logger.info(f"Creating health plan for profile {health_profile_id}")
+            plan_id = db.create_health_plan(
+                health_profile_id=health_profile_id,
+                title=title,
+                goal_type=goal_type,
+                target_value=target_value,
+                target_unit=target_unit,
+                duration_days=duration_days,
+                start_date=start_date.isoformat(),
+                available_activities=available_activities,
+                dietary_restrictions=dietary_restrictions or [],
+                ai_analysis=ai_analysis
+            )
+            logger.info(f"Created health plan with ID: {plan_id}")
+        except Exception as e:
+            logger.error(f"Error creating health plan in database: {str(e)}")
+            raise
         
         # Tạo lịch trình chi tiết
-        self._generate_detailed_schedule(plan_id, start_date, duration_days, ai_analysis)
+        try:
+            logger.info(f"Generating detailed schedule for plan {plan_id}")
+            self._generate_detailed_schedule(plan_id, start_date, duration_days, ai_analysis)
+            logger.info(f"Successfully generated schedule for plan {plan_id}")
+        except Exception as e:
+            logger.error(f"Error generating detailed schedule: {str(e)}")
+            # Xóa plan nếu tạo lịch trình thất bại
+            try:
+                db.delete_health_plan(plan_id, health_profile_id)
+                logger.info(f"Deleted plan {plan_id} due to schedule generation failure")
+            except:
+                pass
+            raise
         
         return plan_id, ai_analysis
     
@@ -109,6 +131,10 @@ MỤC TIÊU:
 - Hoạt động có thể thực hiện: {activities}
 - Hạn chế ăn uống: {restrictions}
 
+QUAN TRỌNG: Bạn PHẢI sử dụng các hoạt động được liệt kê ở trên trong exercise_recommendations. 
+Không được tạo ra hoạt động mới không có trong danh sách. 
+Nếu có nhiều hoạt động, hãy phân bố chúng đều trong tuần.
+
 Hãy phân tích và trả về JSON với các trường:
 {{
   "feasibility_score": (số từ 1-10, 10 là khả thi nhất),
@@ -121,7 +147,7 @@ Hãy phân tích và trả về JSON với các trường:
   ],
   "exercise_recommendations": [
     {{
-      "activity": "tên hoạt động",
+      "activity": "tên hoạt động (PHẢI là một trong các hoạt động được liệt kê ở trên)",
       "frequency_per_week": (số lần/tuần),
       "duration_minutes": (phút/lần),
       "intensity": "low/medium/high",
@@ -174,17 +200,60 @@ Chỉ trả về JSON, không có text khác.
             # Validate và làm sạch dữ liệu
             if not isinstance(ai_analysis, dict):
                 raise ValueError("Invalid AI response format")
+            
+            # Validate exercise recommendations sử dụng đúng activities (linh hoạt)
+            exercise_recs = ai_analysis.get('exercise_recommendations', [])
+            if exercise_recs and available_activities:
+                # Kiểm tra xem AI có sử dụng đúng activities không
+                ai_activities = [rec.get('activity', '') for rec in exercise_recs]
+                
+                # Kiểm tra linh hoạt - cho phép một số hoạt động không khớp
+                valid_count = sum(1 for activity in ai_activities if activity in available_activities)
+                total_count = len(ai_activities)
+                
+                # Nếu ít hơn 50% activities hợp lệ, thì sử dụng fallback
+                if valid_count < total_count * 0.5:
+                    print(f"Warning: AI không sử dụng đủ activities hợp lệ. Expected: {available_activities}, Got: {ai_activities}")
+                    raise ValueError("AI không sử dụng đủ activities được chọn")
                 
             return ai_analysis
             
         except Exception as e:
             # Fallback nếu AI lỗi
-            return self._create_fallback_analysis(goal_type, target_value, duration_days)
+            return self._create_fallback_analysis(goal_type, target_value, duration_days, available_activities)
     
-    def _create_fallback_analysis(self, goal_type: str, target_value: float, duration_days: int) -> Dict[str, Any]:
+    def _create_fallback_analysis(self, goal_type: str, target_value: float, duration_days: int, available_activities: List[str] = None) -> Dict[str, Any]:
         """Tạo phân tích dự phòng khi AI lỗi"""
         
         weeks = max(1, duration_days // 7)
+        
+        # Tạo exercise recommendations từ available_activities
+        exercise_recommendations = []
+        if available_activities and len(available_activities) > 0:
+            # Chia đều các hoạt động trong tuần
+            activities_per_week = min(len(available_activities), 5)  # Tối đa 5 hoạt động/tuần
+            for i, activity in enumerate(available_activities[:activities_per_week]):
+                frequency = max(1, 7 // activities_per_week)  # Phân bố đều trong tuần
+                exercise_recommendations.append({
+                    "activity": activity,
+                    "frequency_per_week": frequency,
+                    "duration_minutes": 30,
+                    "intensity": "medium",
+                    "calories_per_session": 150,
+                    "notes": f"Hoạt động {activity} theo kế hoạch"
+                })
+        else:
+            # Fallback nếu không có activities
+            exercise_recommendations = [
+                {
+                    "activity": "đi bộ",
+                    "frequency_per_week": 5,
+                    "duration_minutes": 30,
+                    "intensity": "medium",
+                    "calories_per_session": 150,
+                    "notes": "Hoạt động cơ bản an toàn"
+                }
+            ]
         
         return {
             "feasibility_score": 7,
@@ -196,16 +265,7 @@ Chỉ trả về JSON, không có text khác.
                 }
                 for i in range(weeks)
             ],
-            "exercise_recommendations": [
-                {
-                    "activity": "đi bộ",
-                    "frequency_per_week": 5,
-                    "duration_minutes": 30,
-                    "intensity": "medium",
-                    "calories_per_session": 150,
-                    "notes": "Hoạt động cơ bản an toàn"
-                }
-            ],
+            "exercise_recommendations": exercise_recommendations,
             "nutrition_guidelines": {
                 "daily_calories": 2000,
                 "macros": {"protein_percent": 20, "carbs_percent": 50, "fat_percent": 30},
@@ -227,50 +287,117 @@ Chỉ trả về JSON, không có text khác.
     ):
         """Tạo lịch trình chi tiết theo ngày"""
         
+        logger.info(f"Starting detailed schedule generation for plan {plan_id}")
         exercise_recs = ai_analysis.get('exercise_recommendations', [])
         nutrition = ai_analysis.get('nutrition_guidelines', {})
         
-        # Tạo hoạt động theo tuần
-        for day_offset in range(duration_days):
-            current_date = start_date + timedelta(days=day_offset)
-            date_str = current_date.isoformat()
+        logger.info(f"Found {len(exercise_recs)} exercise recommendations")
+        logger.info(f"Exercise recommendations: {[ex.get('activity', 'unknown') for ex in exercise_recs]}")
+        
+        # Tạo hoạt động theo tuần với phân bố đều
+        # Tạo lịch trình cho từng hoạt động riêng biệt
+        for i, exercise in enumerate(exercise_recs):
+            frequency = exercise.get('frequency_per_week', 3)
+            activity_name = exercise.get('activity', 'Tập luyện')
             
-            # Thêm hoạt động thể thao (không phải mỗi ngày)
-            for exercise in exercise_recs:
-                frequency = exercise.get('frequency_per_week', 3)
-                # Phân bố đều trong tuần
-                if day_offset % 7 < frequency:
-                    db.add_plan_activity(
+            logger.info(f"Processing exercise {i+1}: {activity_name} with frequency {frequency}/week")
+            
+            # Tạo danh sách ngày tập cho hoạt động này
+            exercise_days = []
+            for day_offset in range(duration_days):
+                day_of_week = day_offset % 7
+                
+                # Phân bố hoạt động đều trong tuần
+                if frequency >= 7:
+                    # Tập hàng ngày
+                    should_exercise = True
+                elif frequency == 6:
+                    # Tập 6 ngày, nghỉ 1 ngày (chủ nhật)
+                    should_exercise = day_of_week < 6
+                elif frequency == 5:
+                    # Tập 5 ngày, nghỉ 2 ngày (thứ 7, chủ nhật)
+                    should_exercise = day_of_week < 5
+                elif frequency == 4:
+                    # Tập 4 ngày: thứ 2, 4, 6, chủ nhật
+                    should_exercise = day_of_week in [0, 2, 4, 6]
+                elif frequency == 3:
+                    # Tập 3 ngày: thứ 2, 4, 6
+                    should_exercise = day_of_week in [0, 2, 4]
+                elif frequency == 2:
+                    # Tập 2 ngày: phân bố dựa trên index của exercise
+                    if i % 3 == 0:
+                        should_exercise = day_of_week in [0, 3]  # Thứ 2, 5
+                    elif i % 3 == 1:
+                        should_exercise = day_of_week in [1, 4]  # Thứ 3, 6
+                    else:
+                        should_exercise = day_of_week in [2, 5]  # Thứ 4, 7
+                else:
+                    # Tập 1 ngày: phân bố dựa trên index của exercise
+                    target_day = i % 7  # Mỗi exercise có ngày khác nhau trong tuần
+                    should_exercise = day_of_week == target_day
+                
+                if should_exercise:
+                    exercise_days.append(day_offset)
+            
+            # Thêm hoạt động vào các ngày đã chọn
+            if frequency == 1:
+                target_day = i % 7
+                day_names = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
+                logger.info(f"Adding {activity_name} to {len(exercise_days)} days (target day: {day_names[target_day]})")
+            else:
+                logger.info(f"Adding {activity_name} to {len(exercise_days)} days")
+            for day_offset in exercise_days:
+                current_date = start_date + timedelta(days=day_offset)
+                date_str = current_date.isoformat()
+                
+                try:
+                    activity_id = db.add_plan_activity(
                         health_plan_id=plan_id,
                         date=date_str,
                         activity_type=exercise.get('activity', 'general'),
-                        activity_name=exercise.get('activity', 'Tập luyện'),
+                        activity_name=activity_name,
                         duration_minutes=exercise.get('duration_minutes', 30),
                         intensity=exercise.get('intensity', 'medium'),
                         calories_target=exercise.get('calories_per_session'),
                         instructions=exercise.get('notes', '')
                     )
-            
-            # Thêm bữa ăn hàng ngày
-            meal_timing = nutrition.get('meal_timing', ['breakfast', 'lunch', 'dinner'])
-            daily_calories = nutrition.get('daily_calories', 2000)
-            calories_per_meal = daily_calories / len(meal_timing)
+                    logger.debug(f"Added activity {activity_id} for {activity_name} on {date_str}")
+                except Exception as e:
+                    logger.error(f"Error adding activity {activity_name} on {date_str}: {str(e)}")
+                    raise
+        
+        # Thêm bữa ăn hàng ngày cho tất cả các ngày
+        logger.info("Adding meal plans")
+        meal_timing = nutrition.get('meal_timing', ['breakfast', 'lunch', 'dinner'])
+        daily_calories = nutrition.get('daily_calories', 2000)
+        calories_per_meal = daily_calories / len(meal_timing)
+        
+        for day_offset in range(duration_days):
+            current_date = start_date + timedelta(days=day_offset)
+            date_str = current_date.isoformat()
             
             for meal_type in meal_timing:
-                db.add_plan_meal(
-                    health_plan_id=plan_id,
-                    date=date_str,
-                    meal_type=meal_type,
-                    food_items=[{
-                        "name": "Thực phẩm được khuyến nghị",
-                        "amount": "khẩu phần vừa phải",
-                        "calories": calories_per_meal,
-                        "notes": "Tuân thủ hướng dẫn dinh dưỡng"
-                    }],
-                    total_calories=calories_per_meal,
-                    macros=nutrition.get('macros', {}),
-                    preparation_notes=f"Bữa {meal_type} theo kế hoạch"
-                )
+                try:
+                    meal_id = db.add_plan_meal(
+                        health_plan_id=plan_id,
+                        date=date_str,
+                        meal_type=meal_type,
+                        food_items=[{
+                            "name": "Thực phẩm được khuyến nghị",
+                            "amount": "khẩu phần vừa phải",
+                            "calories": calories_per_meal,
+                            "notes": "Tuân thủ hướng dẫn dinh dưỡng"
+                        }],
+                        total_calories=calories_per_meal,
+                        macros=nutrition.get('macros', {}),
+                        preparation_notes=f"Bữa {meal_type} theo kế hoạch"
+                    )
+                    logger.debug(f"Added meal {meal_id} for {meal_type} on {date_str}")
+                except Exception as e:
+                    logger.error(f"Error adding meal {meal_type} on {date_str}: {str(e)}")
+                    raise
+        
+        logger.info(f"Completed detailed schedule generation for plan {plan_id}")
     
     def adjust_plan_based_on_feedback(
         self,

@@ -1136,6 +1136,20 @@ def log_activity(profile_id: int, data: ActivityLog, profile=Depends(get_user_pr
         source=data.source,
         activity_plan_id=data.activity_plan_id
     )
+    
+    # Tự động match với plan activity nếu có
+    try:
+        matched_plan_activity_id = db.auto_match_activity_with_plan(profile_id, log_id)
+        if matched_plan_activity_id:
+            return {
+                "message": "Ghi nhận hoạt động thành công", 
+                "log_id": log_id,
+                "matched_plan_activity": matched_plan_activity_id,
+                "auto_matched": True
+            }
+    except Exception as e:
+        logger.warning(f"Auto-matching failed for activity log {log_id}: {str(e)}")
+    
     return {"message": "Ghi nhận hoạt động thành công", "log_id": log_id}
 
 @app.post("/api/profiles/{profile_id}/meal-logs")
@@ -1164,6 +1178,68 @@ def get_meal_logs(profile_id: int, date: Optional[str] = None, limit: int = 50, 
     """Lấy lịch sử bữa ăn"""
     logs = db.get_meal_logs(profile_id, date, limit)
     return logs
+
+@app.delete("/api/profiles/{profile_id}/activity-logs/{log_id}")
+def delete_activity_log(profile_id: int, log_id: int, profile=Depends(get_user_profile)):
+    """Xóa hoạt động đã ghi nhận"""
+    success = db.delete_activity_log(log_id, profile_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Hoạt động không tìm thấy")
+    return {"message": "Xóa hoạt động thành công"}
+
+@app.delete("/api/profiles/{profile_id}/meal-logs/{log_id}")
+def delete_meal_log(profile_id: int, log_id: int, profile=Depends(get_user_profile)):
+    """Xóa bữa ăn đã ghi nhận"""
+    success = db.delete_meal_log(log_id, profile_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Bữa ăn không tìm thấy")
+    return {"message": "Xóa bữa ăn thành công"}
+
+@app.post("/api/profiles/{profile_id}/activity-logs/{log_id}/match-plan")
+def match_activity_with_plan(profile_id: int, log_id: int, profile=Depends(get_user_profile)):
+    """Tự động match activity log với plan activity"""
+    try:
+        matched_plan_activity_id = db.auto_match_activity_with_plan(profile_id, log_id)
+        if matched_plan_activity_id:
+            return {
+                "message": "Đã liên kết hoạt động với kế hoạch",
+                "matched_plan_activity": matched_plan_activity_id
+            }
+        else:
+            return {"message": "Không tìm thấy hoạt động phù hợp trong kế hoạch"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi liên kết: {str(e)}")
+
+@app.post("/api/profiles/{profile_id}/auto-match-activities")
+def auto_match_all_activities(profile_id: int, days_back: int = 7, profile=Depends(get_user_profile)):
+    """Tự động match tất cả activity logs trong X ngày gần đây với plan activities"""
+    from datetime import date, timedelta
+    
+    try:
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Lấy tất cả activity logs trong khoảng thời gian
+        logs = db.get_activity_logs(profile_id, limit=100)
+        matched_count = 0
+        
+        for log in logs:
+            log_date = datetime.fromisoformat(log['date']).date()
+            if start_date <= log_date <= end_date:
+                try:
+                    matched_id = db.auto_match_activity_with_plan(profile_id, log['id'])
+                    if matched_id:
+                        matched_count += 1
+                except:
+                    continue
+        
+        return {
+            "message": f"Đã liên kết {matched_count} hoạt động với kế hoạch",
+            "matched_count": matched_count,
+            "total_checked": len([l for l in logs if start_date <= datetime.fromisoformat(l['date']).date() <= end_date])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi tự động liên kết: {str(e)}")
 
 # ====== PLAN ADJUSTMENT ======
 

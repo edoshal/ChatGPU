@@ -47,7 +47,12 @@ export function createHealthPlansPage() {
             <div class="logs-section">
                 <div class="logs-grid">
                     <div class="activity-logs">
-                        <h3><i class="fas fa-running"></i> Hoạt Động Gần Đây</h3>
+                        <div class="logs-header">
+                            <h3><i class="fas fa-running"></i> Hoạt Động Gần Đây</h3>
+                            <button class="btn btn-sm btn-outline-primary" id="auto-match-btn" title="Tự động liên kết với kế hoạch">
+                                <i class="fas fa-link"></i> Liên kết tự động
+                            </button>
+                        </div>
                         <div id="activity-logs-list"></div>
                     </div>
                     <div class="meal-logs">
@@ -322,6 +327,9 @@ function initEventListeners() {
     document.getElementById('current-weight').addEventListener('change', updateProfileField);
     document.getElementById('current-height').addEventListener('change', updateProfileField);
     document.getElementById('current-age').addEventListener('change', updateProfileField);
+    
+    // Auto-match activities button
+    document.getElementById('auto-match-btn').addEventListener('click', autoMatchActivities);
 }
 
 async function loadPlans() {
@@ -526,6 +534,11 @@ function renderActivityLogs(logs) {
                 </div>
                 <div class="log-date">${formatDate(log.date)}</div>
             </div>
+            <div class="log-actions">
+                <button class="btn-delete" onclick="deleteActivityLog(${log.id})" title="Xóa hoạt động">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
         </div>
     `).join('');
 }
@@ -566,6 +579,11 @@ function renderMealLogs(logs) {
                     ${log.total_calories ? Math.round(log.total_calories) + ' kcal' : 'N/A'}
                 </div>
                 <div class="log-date">${formatDate(log.date)}</div>
+            </div>
+            <div class="log-actions">
+                <button class="btn-delete" onclick="deleteMealLog(${log.id})" title="Xóa bữa ăn">
+                    <i class="fas fa-trash"></i>
+                </button>
             </div>
         </div>
     `).join('');
@@ -614,9 +632,25 @@ async function handleCreatePlan(e) {
             const result = await response.json();
             hideModal('create-plan-modal');
             showSuccess('Tạo kế hoạch thành công!');
-            loadPlans();
-            loadDailyProgress();
-            loadMonthlyTimeline();
+            
+            // Load data với error handling
+            try {
+                await loadPlans();
+            } catch (error) {
+                console.error('Error loading plans:', error);
+            }
+            
+            try {
+                await loadDailyProgress();
+            } catch (error) {
+                console.error('Error loading daily progress:', error);
+            }
+            
+            try {
+                await loadMonthlyTimeline();
+            } catch (error) {
+                console.error('Error loading monthly timeline:', error);
+            }
             
             // Reset form
             e.target.reset();
@@ -642,8 +676,107 @@ async function handleCreatePlan(e) {
     }
 }
 
+// Delete functions
+async function deleteActivityLog(logId) {
+    if (!confirm('Bạn có chắc muốn xóa hoạt động này?')) {
+        return;
+    }
+
+    try {
+        const profileId = getCurrentProfileId();
+        const response = await fetch(`/api/profiles/${profileId}/activity-logs/${logId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${getToken()}`
+            }
+        });
+
+        if (response.ok) {
+            showSuccess('Xóa hoạt động thành công!');
+            loadActivityLogs(); // Reload activity logs
+            loadDailyProgress(); // Refresh daily progress
+        } else {
+            const error = await response.json();
+            showError(error.detail || 'Không thể xóa hoạt động');
+        }
+    } catch (error) {
+        console.error('Error deleting activity log:', error);
+        showError('Lỗi kết nối. Vui lòng thử lại.');
+    }
+}
+
+async function deleteMealLog(logId) {
+    if (!confirm('Bạn có chắc muốn xóa bữa ăn này?')) {
+        return;
+    }
+
+    try {
+        const profileId = getCurrentProfileId();
+        const response = await fetch(`/api/profiles/${profileId}/meal-logs/${logId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${getToken()}`
+            }
+        });
+
+        if (response.ok) {
+            showSuccess('Xóa bữa ăn thành công!');
+            loadMealLogs(); // Reload meal logs
+            loadDailyProgress(); // Refresh daily progress
+        } else {
+            const error = await response.json();
+            showError(error.detail || 'Không thể xóa bữa ăn');
+        }
+    } catch (error) {
+        console.error('Error deleting meal log:', error);
+        showError('Lỗi kết nối. Vui lòng thử lại.');
+    }
+}
+
+// Auto-match activities with plan
+async function autoMatchActivities() {
+    const btn = document.getElementById('auto-match-btn');
+    const originalHtml = btn.innerHTML;
+    
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang liên kết...';
+        
+        const profileId = getCurrentProfileId();
+        const response = await fetch(`/api/profiles/${profileId}/auto-match-activities?days_back=14`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${getToken()}`
+            }
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showSuccess(`${result.message} (Kiểm tra: ${result.total_checked} hoạt động)`);
+            
+            // Refresh data to show updated progress
+            loadDailyProgress();
+            loadMonthlyTimeline();
+            loadActivityLogs();
+        } else {
+            const error = await response.json();
+            showError(error.detail || 'Không thể liên kết hoạt động');
+        }
+    } catch (error) {
+        console.error('Error auto-matching activities:', error);
+        showError('Lỗi kết nối. Vui lòng thử lại.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
 // Global functions for UI interactions
 // Đã bỏ nút xem chi tiết để hiển thị trực tiếp trong thẻ
+
+window.deleteActivityLog = deleteActivityLog;
+window.deleteMealLog = deleteMealLog;
+window.autoMatchActivities = autoMatchActivities;
 
 window.adjustPlan = async function(planId) {
     try {
